@@ -30,12 +30,19 @@ jobs:
           cache: npm
       - name: Install JavaScript dependencies
         run: npm ci --ignore-scripts
-      - name: Install native PHP build dependencies
+      - name: Verify native PHP build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y php8.3-cli php8.3-dev build-essential
-      - name: Install browser test dependencies
-        run: npx playwright install --with-deps chromium firefox
+          if ! command -v php8.3 >/dev/null || ! command -v php-config8.3 >/dev/null || ! command -v cc >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends --no-upgrade -y php8.3-cli php8.3-dev build-essential
+          fi
+          test -f "$(php-config8.3 --include-dir)/php.h"
+          php8.3 --version
+          php-config8.3 --version
+      - name: Install browser test binaries
+        # ubuntu-24.04 already includes Chrome/Firefox system libraries. Avoid
+        # unrelated apt upgrades; Playwright still validates its host libraries.
+        run: npx playwright install --only-shell chromium firefox
       - name: Check and test the real MariaDB engine
         run: npm test
       - name: Compile and exercise the native PDO driver
