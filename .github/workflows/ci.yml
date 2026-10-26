@@ -1,0 +1,57 @@
+name: Bridge checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      BRIDGE_BROWSERS: chromium,firefox
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts
+      - name: Install native PHP build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y php8.3-cli php8.3-dev build-essential
+      - name: Install browser test dependencies
+        run: npx playwright install --with-deps chromium firefox
+      - name: Check and test the real MariaDB engine
+        run: npm test
+      - name: Compile and exercise the native PDO driver
+        env:
+          PHP_BIN: php8.3
+          PHP_CONFIG: php-config8.3
+        run: npm run test:native
+      - name: Package the tested bridge and engine
+        run: npm run release:package
+      - name: Verify standalone release
+        run: node scripts/smoke-release.mjs
+      - name: Retain the verified release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-release
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true

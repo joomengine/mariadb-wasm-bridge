@@ -1,0 +1,23 @@
+JoomEngine MariaDB WASM Bridge
+Copyright 2026 JoomEngine contributors
+
+Bridge source is licensed under Apache License 2.0; see LICENSE.
+
+This project depends on and its browser release archives redistribute
+lite4mariadb 0.1.2, an independently maintained MariaDB WebAssembly build.
+Upstream: https://github.com/shyim/lite4mariadb
+npm: https://www.npmjs.com/package/lite4mariadb/v/0.1.2
+License: GPL-2.0-only (see the dependency's COPYING file).
+Original copyright and license notices remain applicable to MariaDB,
+lite4mariadb and their bundled dependencies. Apache-2.0 does not replace them.
+
+The adapter uses lite4mariadb's raw l4m_query ABI to retain exact result values;
+it does not modify the redistributed upstream engine binary.
+The lockfile records the exact package integrity. Releases include the original
+upstream package metadata, license, and source provenance information.
+
+Pinned upstream source revision for npm 0.1.2:
+24be9371a2f6c71250a2356631ad6feab2280b02
+Source: https://github.com/shyim/lite4mariadb/tree/24be9371a2f6c71250a2356631ad6feab2280b02
+Source archive: https://github.com/shyim/lite4mariadb/archive/24be9371a2f6c71250a2356631ad6feab2280b02.tar.gz
+Upstream build instructions are under wasm/ in that source tree.

@@ -1,0 +1,114 @@
+# Native PDO driver
+
+`pdo_mariadb_wasm` is a real C PDO driver registered under PDO's `mysql` name.
+It uses the `mariadb.v1` host transport supplied by this repository. Compile it
+into JoomEngine PHP WASM instead of native `pdo_mysql`; the two extensions are
+explicitly incompatible because both own that driver name.
+
+The transport invokes the existing `php_wasm_host_call()` function through
+Zend's function API. It therefore uses PHP WASM's existing Asyncify suspension
+without changing its native ABI. A JSON callback alone is insufficient to make
+PDO work; the C source here supplies PDO's driver, connection and statement
+methods.
+
+## Static integration into php-wasm
+
+Copy this directory to `ext/pdo_mariadb_wasm` in the verified PHP source tree,
+then run `./buildconf --force` before configuring PHP. Add
+`--enable-pdo-mariadb-wasm` alongside `--enable-pdo`. The module depends on PDO
+and JSON. Rebuild each supported PHP version and record the bridge source
+release and protocol version with those engine assets. The standard
+`php_pdo_mariadb_wasm.h` header makes PHP's generated static module list include
+the extension.
+
+An example application connection is:
+
+```php
+$db = new PDO(
+    'mysql:host=mariadb-wasm;dbname=joomla;charset=utf8mb4',
+    'root',
+    '',
+    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+);
+$statement = $db->prepare('SELECT value FROM settings WHERE name = :name');
+$statement->execute(['name' => 'sitename']);
+$value = $statement->fetchColumn();
+```
+
+The local endpoint aliases `localhost` and `127.0.0.1` are also accepted for
+Joomla configuration. These identify the embedded engine; they never open a
+network connection. Custom network ports, Unix sockets and other charsets are
+rejected. The host enforces its supported user/password and connection lease.
+
+## Supported behavior and boundaries
+
+- PDO emulated prepares handle named and positional parameters, `bindParam`,
+  `bindValue` and stream LOB input. Disabling emulated prepares is an explicit
+  `HYC00` error. Text uses conventional single-quoted MySQL literals, doubling
+  apostrophes and escaping backslashes/control bytes. This preserves Joomla's
+  `MysqlDriver::escape()` behavior, which strips the surrounding PDO quotes.
+  Binary LOB parameters use hex SQL literals.
+- The host reasserts `utf8mb4` and removes `NO_BACKSLASH_ESCAPES` before every
+  application query, preserving the remaining SQL modes. Applications requiring
+  that mode are unsupported. This is necessary to keep PHP's emulated parameter
+  parser, string escaping and MariaDB's SQL interpretation consistent.
+- The bridge runs SQL against MariaDB. This driver performs no SQL dialect
+  translation. Only one statement per host query is supported.
+- Buffered forward-only results support all normal PDO fetch modes, NULL and
+  arbitrary binary data. Non-NULL database values remain PHP strings, including
+  BIGINT and decimal values. This avoids wasm32 integer truncation.
+- SQLSTATE, MariaDB error number and message are available through standard PDO
+  `errorInfo()`. A statement error does not invalidate a healthy connection.
+- Transactions and autocommit are real SQL commands. `inTransaction()` follows
+  the host's reported server state, including implicit DDL commits.
+- Column names/table metadata come from the host. `getColumnMeta()` includes
+  `mariadb:type`, `mariadb:charset` and `mariadb:flags`. Missing upstream metadata
+  remains missing or empty rather than being inferred from SQL text.
+- `lastInsertId()` returns the host's decimal-string session `LAST_INSERT_ID()`;
+  its value remains sticky until MariaDB changes it. It is not a per-statement
+  success indicator. Named sequences are unsupported.
+- PDO `rowCount()` and `exec()` return native PHP integers. Counts exceeding
+  `PHP_INT_MAX` fail explicitly instead of overflowing on wasm32.
+- Persistent PDO handles, scrollable cursors, native prepares and unimplemented
+  driver attributes fail explicitly. Browser database persistence belongs to
+  the bridge, not `PDO::ATTR_PERSISTENT`.
+- Destruction releases the connection lease. The host must roll back unfinished
+  work when closing. Killing PHP's worker can bypass PHP destruction: the
+  embedding application must close or reset the database bridge on runtime
+  failure before provisioning another PHP runtime.
+
+This extension does not supply mysqli or its constants/classes. Extensions
+calling mysqli directly need a separate implementation and validation.
+
+## Native validation
+
+On Linux install `build-essential`, `php8.3-cli` and `php8.3-dev`, then run:
+
+```sh
+PHP_BIN=php8.3 PHP_CONFIG=php-config8.3 bash native/tests/run.sh
+```
+
+The script compiles the actual C driver as a temporary native PHP extension,
+loads PDO with a clean PHP configuration and runs `tests/contract.php`.
+`PHP_BIN`, `PHP_CONFIG` and `CC` can select another matching toolchain. Compiler
+warnings are errors; temporary binaries are removed on exit.
+
+The contract fixture tests PDO against deterministic host messages. It is not
+a substitute for the real MariaDB engine or PHP WebAssembly integration tests.
+PHP 8.3 native compilation and execution are verified by this suite. The PDO
+callback signatures used here also match upstream PHP 8.4 and 8.5, but those
+WASM builds must be compiled and exercised by php-wasm before compatibility is
+claimed for a released runtime.
+
+Run the real native-driver/database integration as well:
+
+```sh
+PHP_BIN=php8.3 PHP_CONFIG=php-config8.3 node --test native/tests/database.test.mjs
+```
+
+This compiles the same C source, runs PHP natively and forwards its host calls
+over a test STDIO channel to the actual MariaDB WebAssembly worker. It exercises
+prepared SQL, all 256 byte values in a BLOB, UTF-8 and NUL text, exact BIGINT and
+DECIMAL values, transactions and implicit commits, server error information,
+and Joomla's quote-stripping idiom. It does not claim to validate PHP's WASM
+Asyncify path; that remains a php-wasm integration requirement.
