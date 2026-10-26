@@ -36,7 +36,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install --no-install-recommends --no-upgrade -y php8.3-cli php8.3-dev build-essential
           fi
-          test -f "$(php-config8.3 --include-dir)/php.h"
+          test -f "$(php-config8.3 --include-dir)/main/php.h"
           php8.3 --version
           php-config8.3 --version
       - name: Install browser test binaries
