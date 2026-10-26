@@ -58,6 +58,9 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
     async close() {
       if (closed) return;
       closed = true;
+      // Service queued Emscripten pthread lifecycle/proxy messages before native
+      // shutdown enters blocking joins. Promise microtasks do not yield the worker.
+      await new Promise(resolve => setTimeout(resolve, 0));
       // Upstream closes InnoDB before the final IDBFS sync, preserving shutdown writes.
       await database.close();
     },
