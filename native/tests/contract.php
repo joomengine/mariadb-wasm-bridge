@@ -84,9 +84,14 @@ expect('SELECT sample', result([["a\0b\xff", null, '9223372036854775807']], ['bi
 $statement = $db->query('SELECT sample');
 same(3, $statement->columnCount(), 'column count');
 same(1, $statement->rowCount(), 'selected row count');
+same('binary', $statement->getColumnMeta(0)['name'], 'column metadata before first fetch');
 same(['binary' => "a\0b\xff", 'nothing' => null, 'bigint' => '9223372036854775807'], $statement->fetch(PDO::FETCH_ASSOC), 'binary/null/bigint values');
 same(false, $statement->fetch(), 'result exhaustion');
 same('items', $statement->getColumnMeta(0)['table'], 'column table metadata');
+expect('SELECT sample', result([['changed']], ['new_column']));
+$statement->execute();
+same('new_column', $statement->getColumnMeta(0)['name'], 'metadata before fetch after result width changes');
+same('changed', $statement->fetchColumn(), 'fetch after result width changes');
 $statement->closeCursor();
 same(false, $statement->fetch(), 'closed cursor');
 unset($statement);

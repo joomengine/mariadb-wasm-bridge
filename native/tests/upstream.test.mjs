@@ -71,7 +71,7 @@ for (const minor of minors) {
         }
         require '/contract.php';
       `);
-      assert.equal(exitCode, 0, stderr);
+      assert.equal(exitCode, 0, `${stderr}\n${stdout}`);
       assert.equal(stderr, '');
       const result = JSON.parse(stdout);
       assert.equal(result.type, 'complete');
