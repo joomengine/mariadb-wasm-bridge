@@ -35,11 +35,11 @@ same(true,$db->inTransaction(),'transaction');
 $db->exec("INSERT INTO bridge_pdo(label) VALUES ('rolled back')");
 $db->rollBack();
 same(false,$db->inTransaction(),'rollback state');
-same('1',$db->query('SELECT COUNT(*) AS total FROM bridge_pdo')->fetchColumn(),'rollback');
+same(1,$db->query('SELECT COUNT(*) AS total FROM bridge_pdo')->fetchColumn(),'rollback');
 $db->beginTransaction();
 $db->exec("INSERT INTO bridge_pdo(label) VALUES ('committed')");
 $db->commit();
-same('2',$db->query('SELECT COUNT(*) AS total FROM bridge_pdo')->fetchColumn(),'commit');
+same(2,$db->query('SELECT COUNT(*) AS total FROM bridge_pdo')->fetchColumn(),'commit');
 $db->beginTransaction();
 $db->exec('CREATE TABLE implicit_commit (id INT) ENGINE=InnoDB');
 same(false,$db->inTransaction(),'DDL commit');
@@ -50,7 +50,7 @@ try {
     same('23000',$exception->errorInfo[0],'SQLSTATE');
     same(1062,$exception->errorInfo[1],'errno');
 }
-same('2',$db->query('SELECT COUNT(*) AS total FROM bridge_pdo')->fetchColumn(),'error recovery');
+same(2,$db->query('SELECT COUNT(*) AS total FROM bridge_pdo')->fetchColumn(),'error recovery');
 $db->exec("SET sql_mode='NO_BACKSLASH_ESCAPES'");
 $statement=$db->prepare('UPDATE bridge_pdo SET label=:text WHERE id=:id');
 $statement->execute(['text'=>"quoted' \\ text",'id'=>'1']);
@@ -60,12 +60,35 @@ $value="Joomla's \\ escaped value";
 $escaped=substr($db->quote($value),1,-1);
 $db->exec("UPDATE bridge_pdo SET label='$escaped' WHERE id=1");
 same($value,$db->query('SELECT label FROM bridge_pdo WHERE id=1')->fetchColumn(),'Joomla escape idiom');
-same(['1','2',null,"\0\xff"],$db->query("SELECT 1 AS ordering, 2 AS ordering, NULL AS ordering, X'00ff' AS ordering")->fetch(PDO::FETCH_NUM),'duplicate columns preserve positions');
-same(['ordering'=>'2'],$db->query('SELECT 1 AS ordering, 2 AS ordering')->fetch(PDO::FETCH_ASSOC),'PDO associative duplicate semantics');
-same(['ordering'=>['1','2']],$db->query('SELECT 1 AS ordering, 2 AS ordering')->fetch(PDO::FETCH_NAMED),'PDO named duplicate semantics');
+same([1,2,null,"\0\xff"],$db->query("SELECT 1 AS ordering, 2 AS ordering, NULL AS ordering, X'00ff' AS ordering")->fetch(PDO::FETCH_NUM),'duplicate columns preserve positions');
+same(['ordering'=>2],$db->query('SELECT 1 AS ordering, 2 AS ordering')->fetch(PDO::FETCH_ASSOC),'PDO associative duplicate semantics');
+same(['ordering'=>[1,2]],$db->query('SELECT 1 AS ordering, 2 AS ordering')->fetch(PDO::FETCH_NAMED),'PDO named duplicate semantics');
 same([],$db->query('SELECT 1 AS ordering, 2 AS ordering WHERE 0')->fetchAll(PDO::FETCH_NUM),'empty duplicate result');
+same(false,$db->getAttribute(PDO::ATTR_STRINGIFY_FETCHES),'native numeric fetch default');
+$db->exec('CREATE TABLE bridge_numeric (tiny TINYINT, small SMALLINT, medium MEDIUMINT, normal INT, unsigned32 INT UNSIGNED, positive BIGINT, negative BIGINT, signed_max BIGINT, signed_min BIGINT, huge BIGINT UNSIGNED, amount DECIMAL(24,6), approximate FLOAT, precise DOUBLE, year_value YEAR, numeric_text VARCHAR(20), absent INT) ENGINE=InnoDB');
+$db->exec("INSERT INTO bridge_numeric VALUES (-128,-32768,-8388608,-2147483648,4294967295,2147483647,-2147483649,9223372036854775807,-9223372036854775808,18446744073709551615,123456789012345678.123456,1.25,-150,2026,'00123',NULL)");
+$expectedNumeric=[-128,-32768,-8388608,PHP_INT_SIZE===4?PHP_INT_MIN:-2147483648,
+    PHP_INT_SIZE===8?4294967295:'4294967295',2147483647,
+    PHP_INT_SIZE===8?-2147483649:'-2147483649',
+    PHP_INT_SIZE===8?PHP_INT_MAX:'9223372036854775807',
+    PHP_INT_SIZE===8?PHP_INT_MIN:'-9223372036854775808',
+    '18446744073709551615','123456789012345678.123456',1.25,-150.0,2026,'00123',null];
+same($expectedNumeric,$db->query('SELECT * FROM bridge_numeric')->fetch(PDO::FETCH_NUM),'SQL numeric types and native integer bounds');
+$numericStatement=$db->query('SELECT normal,amount FROM bridge_numeric');
+same(PDO::PARAM_INT,$numericStatement->getColumnMeta(0)['pdo_type'],'integer column metadata');
+same(PDO::PARAM_STR,$numericStatement->getColumnMeta(1)['pdo_type'],'decimal column metadata');
+unset($numericStatement);
+$db->setAttribute(PDO::ATTR_STRINGIFY_FETCHES,true);
+same(true,$db->getAttribute(PDO::ATTR_STRINGIFY_FETCHES),'stringify enabled');
+same(['-32768','1.25','-150',null],$db->query('SELECT small,approximate,precise,absent FROM bridge_numeric')->fetch(PDO::FETCH_NUM),'stringify retains numeric text and null');
+$db->setAttribute(PDO::ATTR_STRINGIFY_FETCHES,false);
+same(12,$db->query('SELECT CAST(12 AS SIGNED) AS id')->fetchObject()->id,'application integer primary key');
+$db->exec('DROP TABLE bridge_numeric');
 $db->exec('DROP TABLE implicit_commit');
 $db->exec('DROP TABLE bridge_pdo');
 unset($exception,$db);
 gc_collect_cycles();
+$db=new PDO('mysql:dbname=joomla','root','',[PDO::ATTR_STRINGIFY_FETCHES=>true]);
+same('42',$db->query('SELECT 42')->fetchColumn(),'constructor stringify option');
+unset($db);
 echo json_encode(['type'=>'complete','assertions'=>$assertions],JSON_THROW_ON_ERROR),"\n";

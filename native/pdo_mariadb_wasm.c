@@ -13,7 +13,9 @@
 #include "ext/standard/info.h"
 #include "Zend/zend_exceptions.h"
 #include "Zend/zend_smart_str.h"
+#include "Zend/zend_strtod.h"
 #include <limits.h>
+#include <math.h>
 
 #define WM_VERSION "0.1.0"
 
@@ -84,6 +86,36 @@ static bool wm_count(zval *value, zend_long *count)
         number = number * 10 + digit;
     }
     *count = (zend_long) number;
+    return true;
+}
+
+/* MySQL integer field types: TINY, SHORT, LONG, LONGLONG, INT24 and YEAR. */
+static bool wm_integer_type(zend_long type)
+{
+    return type == 1 || type == 2 || type == 3 || type == 8 || type == 9 || type == 13;
+}
+
+/* Parse within this PHP build's signed integer range, including ZEND_LONG_MIN.
+ * Out-of-range integers remain exact strings, especially on wasm32 builds.
+ */
+static bool wm_integer(zend_string *text, zend_long *value)
+{
+    size_t length = ZSTR_LEN(text), index = 0;
+    if (!length) return false;
+    bool negative = ZSTR_VAL(text)[0] == '-';
+    if (negative && ++index == length) return false;
+    zend_ulong limit = (zend_ulong) ZEND_LONG_MAX + (negative ? 1 : 0);
+    zend_ulong number = 0;
+    for (; index < length; index++) {
+        unsigned char character = (unsigned char) ZSTR_VAL(text)[index];
+        if (character < '0' || character > '9') return false;
+        unsigned digit = character - '0';
+        if (number > (limit - digit) / 10) return false;
+        number = number * 10 + digit;
+    }
+    *value = negative
+        ? (number == (zend_ulong) ZEND_LONG_MAX + 1 ? ZEND_LONG_MIN : -(zend_long) number)
+        : (zend_long) number;
     return true;
 }
 
@@ -314,6 +346,9 @@ static bool wm_in_transaction(pdo_dbh_t *dbh) { return ((wm_db *) dbh->driver_da
 static bool wm_set_attribute(pdo_dbh_t *dbh, zend_long attribute, zval *value)
 {
     switch (attribute) {
+        case PDO_ATTR_STRINGIFY_FETCHES:
+            /* PDO core owns dbh->stringify and applies bound-column overrides. */
+            return true;
         case PDO_ATTR_EMULATE_PREPARES:
             if (zend_is_true(value)) return true;
             return wm_error(dbh, NULL, "HYC00", 0, "Native prepared statements are not supported; emulated prepares are required");
@@ -380,6 +415,7 @@ static int wm_statement_execute(pdo_stmt_t *stmt)
     if (!wm_query(stmt->dbh, stmt, stmt->active_query_string ? stmt->active_query_string : stmt->query_string, &statement->result)) return 0;
     zval *columns = wm_field(&statement->result, "columns");
     php_pdo_stmt_set_column_count(stmt, (int) zend_hash_num_elements(Z_ARRVAL_P(columns)));
+    if (!stmt->columns) stmt->executed = 0;
     if (stmt->column_count) stmt->row_count = (zend_long) zend_hash_num_elements(Z_ARRVAL_P(wm_field(&statement->result, "rows")));
     else wm_count(wm_field(&statement->result, "affectedRows"), &stmt->row_count);
     return 1;
@@ -424,6 +460,24 @@ static int wm_statement_column(pdo_stmt_t *stmt, int index, zval *value, enum pd
     zval *row = zend_hash_index_find(Z_ARRVAL_P(rows), (zend_ulong) statement->row);
     zval *cell = row ? zend_hash_index_find(Z_ARRVAL_P(row), (zend_ulong) index) : NULL;
     if (!cell) return 0;
+    if (Z_TYPE_P(cell) == IS_STRING && !stmt->dbh->stringify) {
+        zval *column = wm_column(stmt, index);
+        zend_long field_type = Z_LVAL_P(wm_field(column, "type"));
+        zend_long integer;
+        if (wm_integer_type(field_type) && wm_integer(Z_STR_P(cell), &integer)) {
+            ZVAL_LONG(value, integer);
+            return 1;
+        }
+        /* FLOAT and DOUBLE are approximate types; DECIMAL remains exact text. */
+        if (field_type == 4 || field_type == 5) {
+            const char *end;
+            double number = zend_strtod(Z_STRVAL_P(cell), &end);
+            if (end == Z_STRVAL_P(cell) + Z_STRLEN_P(cell) && isfinite(number)) {
+                ZVAL_DOUBLE(value, number);
+                return 1;
+            }
+        }
+    }
     ZVAL_COPY(value, cell);
     return 1;
 }
@@ -433,7 +487,9 @@ static int wm_statement_meta(pdo_stmt_t *stmt, zend_long index, zval *value)
     zval *column = wm_column(stmt, index);
     if (!column) return FAILURE;
     array_init(value);
-    add_assoc_long(value, "pdo_type", PDO_PARAM_STR);
+    zend_long field_type = Z_LVAL_P(wm_field(column, "type"));
+    bool integer_type = wm_integer_type(field_type) && (field_type != 8 || SIZEOF_ZEND_LONG == 8);
+    add_assoc_long(value, "pdo_type", integer_type ? PDO_PARAM_INT : PDO_PARAM_STR);
     add_assoc_str(value, "table", zend_string_copy(Z_STR_P(wm_field(column, "table"))));
     add_assoc_long(value, "mariadb:type", Z_LVAL_P(wm_field(column, "type")));
     add_assoc_long(value, "mariadb:charset", Z_LVAL_P(wm_field(column, "charset")));
@@ -470,6 +526,9 @@ static int wm_factory(pdo_dbh_t *dbh, zval *options)
     dbh->driver_data = db;
     dbh->methods = &wm_db_methods;
     dbh->native_case = PDO_CASE_NATURAL;
+    /* Ask PDO to describe result columns immediately after execution, so
+     * getColumnMeta() is safe before the first fetch on every supported PHP. */
+    dbh->alloc_own_columns = 1;
     if (dbh->is_persistent) {
         wm_error(dbh, NULL, "HYC00", 0, "Persistent PDO handles are not supported; persist the MariaDB bridge instead");
         goto failure;

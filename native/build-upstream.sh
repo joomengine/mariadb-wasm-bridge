@@ -44,17 +44,25 @@ printf '%s  %s\n' "$source_sha" "$archive" | sha256sum --check --status || {
   printf 'PHP source archive checksum mismatch: %s\n' "$archive" >&2; exit 1;
 }
 
-configure_args=(--disable-all --enable-pdo --enable-embed=static --disable-cli
+configure_args=(--host=wasm32-unknown-emscripten
+  --disable-all --enable-pdo --enable-embed=static --disable-cli
   --disable-cgi --disable-phpdbg --disable-fiber-asm --disable-opcache-jit
   --without-pear --without-pcre-jit)
-fingerprint=$(printf '%s\n' "$source_sha" "$compiler_version" "${configure_args[@]}" | sha256sum | cut -d' ' -f1)
+# PHP's cross-compile fallbacks assume 64-bit ssize_t/ptrdiff_t and cannot
+# discover intmax_t or byte order. Set the verified wasm32 target values.
+configure_env=(php_cv_sizeof_intmax_t=8 php_cv_sizeof_ssize_t=4
+  php_cv_sizeof_ptrdiff_t=4 ac_cv_c_bigendian_php=no)
+fingerprint=$(printf '%s\n' "$source_sha" "$compiler_version" "${configure_args[@]}" "${configure_env[@]}" | sha256sum | cut -d' ' -f1)
 if [[ ! -f "$source_dir/.bridge-header-fingerprint" ]] || [[ $(cat "$source_dir/.bridge-header-fingerprint") != "$fingerprint" ]]; then
   # Only this build-owned source directory is replaced; cached archives remain.
   rm -rf -- "$source_dir"
   tar --extract --xz --file "$archive" --directory "$cache_dir" --no-same-owner
   printf 'Configuring PHP %s headers for wasm32…\n' "$php_version"
-  (cd -- "$source_dir" && emconfigure ./configure "${configure_args[@]}" > configure-extension.log 2>&1) || {
-    tail -80 "$source_dir/configure-extension.log" >&2; exit 1;
+  (cd -- "$source_dir" && env "${configure_env[@]}" emconfigure ./configure \
+    --build="$(sh build/config.guess)" "${configure_args[@]}" > configure-extension.log 2>&1) || {
+    tail -80 "$source_dir/configure-extension.log" >&2
+    if [[ -f "$source_dir/config.log" ]]; then tail -120 "$source_dir/config.log" >&2; fi
+    exit 1
   }
   printf '%s\n' "$fingerprint" > "$source_dir/.bridge-header-fingerprint"
 fi

@@ -105,8 +105,9 @@ Related JS/WASM assets must satisfy worker origin/CORS policies.
 - PDO emulated prepares are supported. Native server-side prepares, `mysqli`,
   networking and password authentication are not implemented. The embedded engine
   accepts root or an empty username with an empty password.
-- Connections use `utf8mb4`. Binary/NUL values survive transport. BIGINT and
-  DECIMAL values remain strings.
+- Connections use `utf8mb4`. Binary/NUL values survive transport. PDO returns
+  in-range integers and floating types as PHP numbers; out-of-range integers
+  and DECIMAL values remain exact strings. `PDO::ATTR_STRINGIFY_FETCHES` is supported.
 - The bridge disables `NO_BACKSLASH_ESCAPES` before each query so PDO and Joomla
   text quoting stay consistent. Other SQL mode flags are preserved.
 - BIT and GEOMETRY results require an explicit SQL cast to a supported numeric,

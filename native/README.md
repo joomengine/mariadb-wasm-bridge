@@ -101,8 +101,10 @@ rejected. The host enforces its supported user/password and connection lease.
 - The bridge runs SQL against MariaDB. This driver performs no SQL dialect
   translation. Only one statement per host query is supported.
 - Buffered forward-only results support all normal PDO fetch modes, NULL and
-  arbitrary binary data. Non-NULL database values remain PHP strings, including
-  BIGINT and decimal values. This avoids wasm32 integer truncation.
+  arbitrary binary data. Integer columns become PHP integers when they fit the
+  runtime's signed integer range; larger integers and DECIMAL values remain exact
+  strings. FLOAT and DOUBLE become PHP floats. `PDO::ATTR_STRINGIFY_FETCHES`
+  preserves numeric strings when enabled, including through constructor options.
 - SQLSTATE, MariaDB error number and message are available through standard PDO
   `errorInfo()`. A statement error does not invalidate a healthy connection.
 - Transactions and autocommit are real SQL commands. `inTransaction()` follows
