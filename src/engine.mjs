@@ -30,7 +30,19 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
     if (sql.includes('\0')) throw engineError('SQL cannot contain NUL bytes; encode binary values as hexadecimal literals', 'HY000');
     requireSingleStatement(sql, stringMode);
     const module = database.mod;
-    const pointer = module.ccall('l4m_query', 'number', ['string'], [sql]);
+    // Emscripten string arguments use the C stack. Extension install queries can
+    // exceed MariaDB's stack limit, so keep their UTF-8 bytes on the heap.
+    const size = module.lengthBytesUTF8(sql) + 1;
+    if (!Number.isSafeInteger(size) || size < 1 || size > 0x7fffffff) {
+      throw engineError('SQL exceeds the engine allocation limit', 'HY001');
+    }
+    const input = module._malloc(size);
+    if (!Number.isSafeInteger(input) || input <= 0) throw engineError('Cannot allocate SQL input', 'HY001');
+    let pointer;
+    try {
+      module.stringToUTF8(sql, input, size);
+      pointer = module._l4m_query(input);
+    } finally { module._free(input); }
     if (!pointer) throw engineError('MariaDB returned an empty result pointer', 'HY000');
     let json;
     try { json = module.UTF8ToString(pointer); }
