@@ -6,6 +6,9 @@ release does not require a new PHP engine build to validate the MariaDB worker.
 PHP applications use the published upstream runtime and load a version-matched
 native PDO extension built from the included driver source.
 
+Use the Node.js version in [.node-version](../.node-version) for local validation
+and release preparation. CI uses the same exact version for every Node job.
+
 Version 0.1.3 is prepared in the package metadata. After its pull request is
 merged, create the matching `v0.1.3` tag from that merged commit. For the next
 release, prepare its newer version in a reviewed pull request before tagging:

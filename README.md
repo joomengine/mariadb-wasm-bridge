@@ -38,7 +38,10 @@ application and validates Joomla workflows.
 
 ## Use from JavaScript
 
-Requires Node.js 24+ for development. Clone this repository, run `npm ci`, then
+The package supports Node.js 24+, while development and CI use Node.js 26.12.1
+from [.node-version](.node-version) to avoid the known
+[Node.js 24.x shared-WASM lifecycle crash](https://github.com/nodejs/node/issues/66366).
+Clone this repository, run `npm ci`, then
 `npm run prepare:engine`. Tests and release packaging run preparation automatically.
 The entry point is `src/index.mjs`; npm packages and standalone release archives
 include the prepared engine under `vendor/lite4mariadb`, with no consumer build or
