@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { createMariaDB } from '../../src/index.mjs';
 
-// The C driver and MariaDB engine are real. PHP is native here; php-wasm must
-// additionally validate its own Asyncify path when compiling this driver.
+// The C driver and MariaDB engine are real. PHP is native here; upstream.test.mjs
+// additionally validates the loadable WASM driver's Asyncify path.
 test('native PDO executes against MariaDB WebAssembly', { timeout: 180_000 }, async () => {
   const db = await createMariaDB({ database: 'joomla' });
   const script = fileURLToPath(new URL('./run.sh', import.meta.url));

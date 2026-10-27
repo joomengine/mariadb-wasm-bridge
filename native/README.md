@@ -1,15 +1,61 @@
 # Native PDO driver
 
 `pdo_mariadb_wasm` is a real C PDO driver registered under PDO's `mysql` name.
-It uses the `mariadb.v1` host transport supplied by this repository. Compile it
-into JoomEngine PHP WASM instead of native `pdo_mysql`; the two extensions are
-explicitly incompatible because both own that driver name.
+It uses the `mariadb.v1` host transport supplied by this repository. Load it into
+[Sean Morris's PHP runtime](https://github.com/seanmorris/php-wasm) as a matching
+WebAssembly extension, or compile it into a custom PHP build. It is incompatible
+with native `pdo_mysql` because both extensions own the same driver name.
 
 The transport invokes the existing `php_wasm_host_call()` function through
-Zend's function API. It therefore uses PHP WASM's existing Asyncify suspension
-without changing its native ABI. A JSON callback alone is insufficient to make
+Zend's function API. The [upstream adapter](../adapters/php-wasm.php) uses Vrzno
+and the runtime's existing Asyncify suspension. A JSON callback alone is insufficient to make
 PDO work; the C source here supplies PDO's driver, connection and statement
 methods.
+
+## Loadable extension for upstream PHP
+
+`native/upstream-versions.json` records the exact supported runtime and PHP source
+versions. The current profile targets `php-wasm` and `php-cgi-wasm` **0.2.0**:
+PHP **8.3.11**, **8.4.1** and **8.5.2**, compiled with **Emscripten 6.0.6**.
+The extension uses wasm32, NTS and non-debug PHP headers. Changing runtime
+versions requires rebuilding and testing the corresponding extensions.
+
+With Emscripten 6.0.6 activated, Node.js 24+, Bash, curl, xz/tar, Make, Bison and
+re2c available, build and test all supported modules:
+
+```sh
+npm ci --ignore-scripts
+npm run prepare:engine
+for minor in 8.3 8.4 8.5; do
+  bash native/build-upstream.sh "$minor"
+done
+node --test native/tests/upstream.test.mjs
+```
+
+The builder downloads checksum-pinned PHP source archives, configures their
+headers and compiles only this driver. It does not rebuild or patch the upstream
+runtime. Outputs are `.native-build/upstream/php8.x-pdo-mariadb-wasm.so` plus a
+JSON manifest containing source, compiler, runtime and output hashes. Pass an
+output directory as the second argument; `BRIDGE_BUILD_CACHE` changes the source
+cache directory. The tests accept `PHP_WASM_EXTENSION_DIR`, `PHP_WASM_MODULE_ROOT`
+(the directory containing the installed runtime packages) and a comma-separated
+`PHP_WASM_VERSIONS` selection.
+
+Upstream's `sharedLibs` option loads the module. Install the adapter as an
+`auto_prepend_file` for CGI requests and supply its `mariadbCall` JavaScript
+callback. See [the integration guide](../docs/integration.md) for the complete
+host setup. A PHP worker and MariaDB worker remain separate; the adapter forwards
+their asynchronous host messages.
+
+The real-engine suite verifies native PDO queries, prepares, binary and numeric
+values, transactions and errors for every supported minor. CGI tests verify
+native destructor cleanup and rollback on normal return, `exit(17)` and fatal
+errors. Upstream replaces its PHP instance after non-zero termination; the
+application must restore its filesystem or stop the session before continuing.
+Always call `database.reset()` after every settled CGI request, including success.
+Framework containers can retain PDO references beyond the phase where native
+destruction can use the transport. Serialize this reset with the next request;
+the regression suite covers a container-held PDO connection and subsequent query.
 
 ## Static integration into php-wasm
 
@@ -95,10 +141,8 @@ warnings are errors; temporary binaries are removed on exit.
 
 The contract fixture tests PDO against deterministic host messages. It is not
 a substitute for the real MariaDB engine or PHP WebAssembly integration tests.
-PHP 8.3 native compilation and execution are verified by this suite. The PDO
-callback signatures used here also match upstream PHP 8.4 and 8.5, but those
-WASM builds must be compiled and exercised by php-wasm before compatibility is
-claimed for a released runtime.
+PHP 8.3 native compilation and execution are verified by this suite. The
+separate upstream suite above validates PHP 8.3, 8.4 and 8.5 WASM execution.
 
 Run the real native-driver/database integration as well:
 
@@ -110,5 +154,5 @@ This compiles the same C source, runs PHP natively and forwards its host calls
 over a test STDIO channel to the actual MariaDB WebAssembly worker. It exercises
 prepared SQL, all 256 byte values in a BLOB, UTF-8 and NUL text, exact BIGINT and
 DECIMAL values, transactions and implicit commits, server error information,
-and Joomla's quote-stripping idiom. It does not claim to validate PHP's WASM
-Asyncify path; that remains a php-wasm integration requirement.
+and Joomla's quote-stripping idiom. The upstream suite runs the same PDO fixture
+inside the published WebAssembly runtime and validates its Asyncify path.

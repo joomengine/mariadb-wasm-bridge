@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * PDO MySQL transport for the JoomEngine MariaDB WASM bridge, protocol v1.
- * Statically compile this extension into php-wasm, without native pdo_mysql.
+ * Compile into PHP or load as a matching WASM extension, without native pdo_mysql.
  */
 #ifdef HAVE_CONFIG_H
 # include "config.h"

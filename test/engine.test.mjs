@@ -70,10 +70,10 @@ test('real MariaDB supports rollback and reports server errors', { timeout: 60_0
   assert.deepEqual(result.sqlError, { errno: 1146, sqlstate: '42S02' });
 });
 
-test('duplicate columns, embedded NUL and use after close fail explicitly', { timeout: 60_000 }, async () => {
+test('embedded NUL and use after close fail explicitly', { timeout: 60_000 }, async () => {
   const errors = await runEngine(`
     const errors = [];
-    for (const sql of ['SELECT 1 AS a, 2 AS a', 'SELECT 1' + String.fromCharCode(0) + '; SELECT 2']) {
+    for (const sql of ['SELECT 1' + String.fromCharCode(0) + '; SELECT 2']) {
       try { engine.query(sql); } catch (error) { errors.push(error.sqlstate); }
     }
     await engine.close();
@@ -81,7 +81,15 @@ test('duplicate columns, embedded NUL and use after close fail explicitly', { ti
     await engine.close();
     return errors;
   `);
-  assert.deepEqual(errors, ['HYC00', 'HY000', 2006]);
+  assert.deepEqual(errors, ['HY000', 2006]);
+});
+
+test('real MariaDB preserves duplicate column occurrences positionally', { timeout: 60_000 }, async () => {
+  const result = await runEngine(`
+    return engine.query("SELECT 1 AS ordering, 2 AS ordering, NULL AS ordering, X'00ff' AS ordering, 7 AS __proto__, 8 AS \u00602\u0060, 9 AS \u00601\u0060");
+  `);
+  assert.deepEqual(result.fields, ['ordering', 'ordering', 'ordering', 'ordering', '__proto__', '2', '1']);
+  assert.deepEqual(result.rowValues, [['1', '2', null, { $h: '00ff' }, '7', '8', '9']]);
 });
 
 test('scripts fail before execution, including executable comments and mode ambiguity', { timeout: 60_000 }, async () => {

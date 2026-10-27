@@ -21,6 +21,22 @@ function decode(value) {
 }
 const timeout = { timeout: 60_000 };
 
+test('host protocol retains duplicate result names and every positional cell', timeout, async () => {
+  const database = await createMariaDB();
+  try {
+    const connection = await connect(database);
+    const result = await execute(database, connection, "SELECT 1 AS ordering, 2 AS ordering, NULL AS ordering, X'00ff' AS ordering");
+    assert.deepEqual(result.columns.map(column => column.name), ['ordering', 'ordering', 'ordering', 'ordering']);
+    assert.deepEqual(result.rows[0].slice(0, 3).map(decode), ['1', '2', null]);
+    assert.deepEqual(Buffer.from(result.rows[0][3], 'base64'), Buffer.from([0, 255]));
+    const empty = await execute(database, connection, 'SELECT 1 AS ordering, 2 AS ordering WHERE 0');
+    assert.equal(empty.columns.length, 2);
+    assert.deepEqual(empty.rows, []);
+  } finally {
+    await database.close();
+  }
+});
+
 test('public host-call API executes real MariaDB and preserves PHP wire values', timeout, async () => {
   const database = await createMariaDB();
   try {

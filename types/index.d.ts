@@ -31,11 +31,11 @@ export interface MariaDBOptions {
 export interface MariaDBBridge {
   readonly state: 'starting' | 'ready' | 'closing' | 'closed';
   readonly serverVersion: string;
-  /** Pass directly to createPHP({ hostCalls: db.hostCalls }). */
+  /** Pass to createPhpWasmAdapter(), or forward through a PHP worker RPC channel. */
   readonly hostCalls: Readonly<{ 'mariadb.v1': (payloadJSON: string) => Promise<string> }>;
   /** Explicit durability boundary for browser persistence. */
   flush(): Promise<void>;
-  /** Roll back and discard the connection lease after abandoned PHP execution. */
+  /** Roll back and discard the lease after every completed CGI request or abandoned execution. */
   reset(): Promise<void>;
   /** Drain accepted work, roll back, persist, terminate, and release the lock. */
   close(): Promise<void>;

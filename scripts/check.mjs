@@ -17,7 +17,9 @@ const engineVersion = pkg.devDependencies.lite4mariadb;
 if (!/^\d+\.\d+\.\d+$/.test(engineVersion) || lock.packages['node_modules/lite4mariadb'].version !== engineVersion) {
   throw new Error('The MariaDB engine must use one exact, lockfile-verified version');
 }
-for (const file of Object.values(pkg.exports['.'])) await access(path.join(root, file));
+for (const entry of Object.values(pkg.exports)) {
+  for (const file of Object.values(entry)) await access(path.join(root, file));
+}
 
 async function walk(directory) {
   const files = [];
@@ -28,7 +30,7 @@ async function walk(directory) {
   }
   return files;
 }
-for (const directory of ['src', 'scripts', 'test', 'patches']) {
+for (const directory of ['src', 'scripts', 'test', 'patches', 'adapters', 'native/tests']) {
   for (const file of await walk(path.join(root, directory))) {
     if (!/\.(?:mjs|js)$/.test(file)) continue;
     if (spawnSync(process.execPath, ['--check', file], { stdio: 'inherit' }).status !== 0) {
