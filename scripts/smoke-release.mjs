@@ -12,8 +12,12 @@ try {
   const smoke = `
 import assert from 'node:assert/strict';
 import { createMariaDB } from './src/index.mjs';
+import { createPhpWasmAdapter } from './adapters/php-wasm.mjs';
 const db = await createMariaDB();
 try {
+  const adapter = createPhpWasmAdapter(db.hostCalls);
+  assert.equal(typeof adapter.shared.mariadbCall, 'function');
+  assert.equal(adapter.files[0].name, 'mariadb.php');
   const call = async (request) => {
     const response = JSON.parse(await db.hostCalls['mariadb.v1'](JSON.stringify({ version: 1, ...request })));
     assert.equal(response.ok, true, JSON.stringify(response));
@@ -43,6 +47,7 @@ console.log('Standalone release executes real MariaDB queries without node_modul
   run('npm', ['install', '--ignore-scripts', '--omit=dev', '--offline', '--no-audit', '--no-fund', '--package-lock=false', path.join(releaseDir, npmName)], { cwd: consumer });
   await writeFile(path.join(consumer, 'smoke.mjs'), smoke
     .replace("from './src/index.mjs'", "from '@joomengine/mariadb-wasm-bridge'")
+    .replace("from './adapters/php-wasm.mjs'", "from '@joomengine/mariadb-wasm-bridge/php-wasm'")
     .replace('Standalone release executes real MariaDB queries without node_modules.', 'Installed npm package executes real MariaDB with lifecycle scripts disabled and no upstream runtime dependency.'));
   process.stdout.write(run(process.execPath, [path.join(consumer, 'smoke.mjs')], { cwd: consumer, timeout: 120_000 }));
 } finally {

@@ -22,7 +22,7 @@ const bundleName = `mariadb-wasm-bridge-${pkg.version}`;
 const bundle = path.join(staging, bundleName);
 try {
   await mkdir(bundle);
-  for (const name of ['src', 'types', 'native', 'docs', 'patches', 'README.md', 'LICENSE', 'NOTICE']) {
+  for (const name of ['src', 'types', 'native', 'adapters', 'docs', 'patches', 'README.md', 'LICENSE', 'NOTICE']) {
     await cp(path.join(root, name), path.join(bundle, name), {
       recursive: true,
       filter: source => !/(?:^|\/)(?:\.build|\.libs|\.native-build|autom4te\.cache)(?:\/|$)|\.(?:so|o|lo|la)$/.test(source),

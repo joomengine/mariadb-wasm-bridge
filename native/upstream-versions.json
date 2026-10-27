@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/seanmorris/php-wasm",
+  "commit": "1e1fb6703730759181e84c62bce35ee9129febb9",
+  "runtimeVersion": "0.2.0",
+  "emscriptenVersion": "6.0.6",
+  "php": {
+    "8.3": {
+      "version": "8.3.11",
+      "sha256": "b862b098a08ab9bf4b36ed12c7d0d9f65353656b36fb0e3c5344093aceb35802"
+    },
+    "8.4": {
+      "version": "8.4.1",
+      "sha256": "94c8a4fd419d45748951fa6d73bd55f6bdf0adaefb8814880a67baa66027311f"
+    },
+    "8.5": {
+      "version": "8.5.2",
+      "sha256": "cb75a9b00a2806f7390dd64858ef42a47b443b3475769c8af6af33a18b1381f1"
+    }
+  },
+  "emsdkCommit": "d7b4130688bfa348392b921ab04015aa15c4f154"
+}

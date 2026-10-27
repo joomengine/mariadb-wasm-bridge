@@ -1,9 +1,25 @@
 # MariaDB WASM Bridge
 
-A versioned MariaDB WebAssembly bridge and native PDO driver source for
-[JoomEngine PHP WASM](https://github.com/joomengine/php-wasm). SQL executes in
+A versioned MariaDB WebAssembly bridge and native PDO extension for
+[Sean Morris’s PHP WASM runtime](https://github.com/seanmorris/php-wasm). SQL executes in
 real MariaDB through [lite4mariadb](https://github.com/shyim/lite4mariadb), without
 SQLite translation, an external database service or a Docker runtime.
+
+## Upstream foundations and credits
+
+This integration builds on the work of these projects and their maintainers:
+
+- **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
+  and contributors provide the PHP WebAssembly runtime, browser and CGI execution,
+  filesystem, Vrzno integration and native extension loading used by the playground.
+- **[emscripten-core/emscripten](https://github.com/emscripten-core/emscripten)** —
+  The Emscripten maintainers and contributors provide the compiler, JavaScript
+  integration, virtual filesystem and Asyncify support used by these WASM modules.
+- **[shyim/lite4mariadb](https://github.com/shyim/lite4mariadb)** — Provides the real
+  MariaDB WebAssembly engine bundled by this bridge.
+
+Thank you to these communities for the engineering and maintenance that make this
+project possible. Upstream licenses and notices remain included in our releases.
 
 ## Implementation status
 
@@ -12,10 +28,13 @@ This initial implementation supplies a dedicated database worker, the versioned
 real-engine tests. It registers PDO's `mysql` driver name so Joomla can use its
 normal PDO MySQL database path.
 
-**The native driver must still be statically compiled into a `php-wasm` engine.**
-Installing this JavaScript package alone does not add a PDO driver to PHP. Native
-PHP tests against MariaDB WASM do not certify a combined PHP-WASM build, Joomla
-installation or JCB compilation. Those are the next integration steps.
+**The native driver loads into the published upstream runtime as a separate WASM
+extension.** The build profile targets `php-wasm` and `php-cgi-wasm` 0.2.0 with
+PHP 8.3.11, 8.4.1 and 8.5.2. No PHP runtime fork is required. Installing this
+JavaScript package alone does not compile or load that driver; see
+[the integration guide](docs/integration.md) for the builder, adapter and lifecycle.
+The [playground](https://github.com/joomengine/playground) assembles the browser
+application and validates Joomla workflows.
 
 ## Use from JavaScript
 
@@ -47,9 +66,12 @@ try {
 }
 ```
 
-Pass `database.hostCalls` to `createPHP`'s `hostCalls` option. A runtime containing
-`pdo_mariadb_wasm` then uses `new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '')`.
-See [docs/integration.md](docs/integration.md) for native integration steps.
+Use `createPhpWasmAdapter(database.hostCalls)` from the `./php-wasm` package export
+with upstream PHP and load the matching `pdo_mariadb_wasm` extension. PHP then uses
+`new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '')`. The PHP worker must
+finish each CGI request before the bridge owner calls `database.reset()`; wait
+for that cleanup before accepting another request, even after successful PHP
+execution. See [docs/integration.md](docs/integration.md).
 
 ## Browser storage and hosting
 
@@ -89,8 +111,8 @@ Related JS/WASM assets must satisfy worker origin/CORS policies.
   text quoting stay consistent. Other SQL mode flags are preserved.
 - BIT and GEOMETRY results require an explicit SQL cast to a supported numeric,
   text or binary type; upstream otherwise risks corrupting their bytes.
-- One SQL statement is accepted per call. Duplicate result-column names are
-  rejected because upstream's object rows cannot preserve them; use aliases.
+- One SQL statement is accepted per call. Duplicate result-column names retain
+  every positional value; the decoder preserves native JSON member order.
 - Column names and MariaDB type/charset/flags are available; source table names
   are unavailable and returned empty.
 - `lastInsertId()` uses session `LAST_INSERT_ID()`, retained until another insert
@@ -114,12 +136,15 @@ npm run test:integration
 npx playwright install --with-deps chromium firefox
 BRIDGE_BROWSERS=chromium,firefox npm run test:browser
 npm run test:native
+for minor in 8.3 8.4 8.5; do npm run build:upstream -- "$minor"; done
+npm run test:upstream
 npm run release:package
 node scripts/smoke-release.mjs
 ```
 
 Native tests require PHP development headers, `phpize`, `php-config`, a C compiler,
-Make and Autoconf. CI runs native PDO, real-engine, Chromium/Firefox persistence,
+Make and Autoconf. WASM extension builds require Emscripten 6.0.6, Bison and re2c.
+CI runs native PDO, upstream PHP-WASM PDO, real-engine, Chromium/Firefox persistence,
 and standalone archive tests. See [docs/releasing.md](docs/releasing.md).
 
 The playground may resolve the latest stable release during its build, record

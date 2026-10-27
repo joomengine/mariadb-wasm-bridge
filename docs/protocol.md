@@ -45,8 +45,10 @@ original bytes. Numeric values are decimal text bytes, not JSON numbers. This
 retains BIGINT/DECIMAL precision on wasm32 PHP and in JavaScript. Type, charset
 and flags use MariaDB metadata integers; source table names are unavailable.
 `affectedRows` and `insertId` are decimal strings. Results are buffered and
-forward-only in PDO. Duplicate column names fail with `HYC00` rather than silently
-collapsing values in the upstream object's encoding.
+forward-only in PDO. Duplicate column names retain every positional value. The
+decoder preserves native JSON row-member order before object-key replacement,
+and validates each member against the corresponding field name. PDO applies its
+normal numeric, associative and named fetch semantics to those original cells.
 
 Errors retain MariaDB's SQLSTATE and errno when available. Stable bridge codes
 identify validation, lease, queue, request/response limit and lifecycle failures.

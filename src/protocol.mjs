@@ -89,7 +89,7 @@ export class MariaDBProtocol {
       const [type, charset, flags] = raw.types[index];
       return { name, table: '', type, charset, flags };
     });
-    const rows = raw.rows.map((row) => columns.map(({ name }) => encodeCell(row[name])));
+    const rows = (raw.rowValues ?? []).map(row => row.map(encodeCell));
     const status = await this.engine.query('SELECT CAST(LAST_INSERT_ID() AS CHAR) AS insert_id, @@in_transaction AS active_transaction');
     const metadata = status.rows[0];
     if (!metadata || !/^\d+$/.test(metadata.insert_id) || !['0', '1'].includes(metadata.active_transaction)) {

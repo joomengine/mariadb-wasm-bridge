@@ -32,6 +32,8 @@ export async function verifyRelease() {
   assert.ok(manifest.files['vendor/lite4mariadb/lite4mariadb.wasm'], 'Engine binary is missing from manifest');
   assert.ok(manifest.files['vendor/lite4mariadb/COPYING'], 'Engine license is missing from manifest');
   assert.ok(manifest.files['src/index.mjs'], 'Bridge entry point is missing from manifest');
+  assert.ok(manifest.files['adapters/php-wasm.mjs'], 'Upstream JavaScript adapter is missing from manifest');
+  assert.ok(manifest.files['adapters/php-wasm.php'], 'Upstream PHP transport is missing from manifest');
 
   const extracted = await mkdtemp(path.join(tmpdir(), 'mariadb-bridge-verify-'));
   try {

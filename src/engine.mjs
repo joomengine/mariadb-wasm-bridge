@@ -1,3 +1,5 @@
+import { parseEngineResult } from './result.mjs';
+
 /** Isolate the raw JSON ABI of the pinned lite4mariadb 0.1.2 package. */
 export async function createEngine({ dataDir = 'memory://', engineModuleUrl, wasmUrl } = {}) {
   const isNode = typeof process !== 'undefined' && Boolean(process.versions?.node);
@@ -34,15 +36,14 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
     try { json = module.UTF8ToString(pointer); }
     finally { module._l4m_free(pointer); }
     let result;
-    try { result = JSON.parse(json); }
+    try { result = parseEngineResult(json); }
     catch (cause) { throw new Error('MariaDB returned invalid JSON', { cause }); }
     if (!result || typeof result !== 'object') throw engineError('MariaDB returned an invalid result envelope', 'HY000');
     if (result.ok !== true) throw engineError(result.error || 'MariaDB query failed', result.sqlstate || 'HY000', result.errno);
     if (!Array.isArray(result.rows)) throw engineError('MariaDB returned invalid rows', 'HY000');
     if (result.fields !== undefined) {
       if (!Array.isArray(result.fields) || !result.fields.every((field) => typeof field === 'string')) throw engineError('MariaDB returned invalid column names', 'HY000');
-      // Upstream emits object rows and has already discarded duplicate names.
-      if (new Set(result.fields).size !== result.fields.length) throw engineError('Duplicate result column names are unsupported; assign unique SQL aliases', 'HYC00', 0, 'UNSUPPORTED_RESULT');
+      if (!Array.isArray(result.rowValues)) throw engineError('MariaDB returned invalid positional rows', 'HY000');
       if (!Array.isArray(result.types) || result.types.length !== result.fields.length) throw engineError('MariaDB returned invalid column metadata', 'HY000');
       // Upstream 0.1.2 does not hex-encode BIT or GEOMETRY. Their arbitrary
       // bytes pass through UTF8ToString and can already have been corrupted.
