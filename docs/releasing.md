@@ -2,8 +2,26 @@
 
 The bridge has its own semantic version in `package.json` and
 `package-lock.json`. Its JSON host protocol has a separate version. A bridge
-release does not require a new PHP engine build to validate the MariaDB worker;
-PHP applications need a PHP engine compiled with the included native PDO driver.
+release does not require a new PHP engine build to validate the MariaDB worker.
+PHP applications use the published upstream runtime and load a version-matched
+native PDO extension built from the included driver source.
+
+Version 0.1.3 is prepared in the package metadata. After its pull request is
+merged, create the matching `v0.1.3` tag from that merged commit. For the next
+release, prepare its newer version in a reviewed pull request before tagging:
+
+```bash
+git fetch origin --tags
+npm run release:prepare -- 0.1.4
+npm run check
+node scripts/verify-tag.mjs v0.1.4
+```
+
+The preparation command updates the package version and both lockfile root
+versions together. It requires a newer stable version and rejects a tag already
+present locally. Commit those changes and merge them before tagging. If a tag
+was created with inconsistent metadata, leave it intact and prepare the next
+unused version instead.
 
 Before tagging, run:
 
@@ -29,10 +47,11 @@ It packages only after all checks pass, then extracts the standalone archive in
 a temporary directory and runs real database queries without `node_modules`.
 A missing browser, native build failure, or engine startup failure fails CI.
 
-After merging a reviewed change, update the package version and lockfile, commit
-them, and push the matching tag, for example `v0.1.0`. The release workflow
-rejects tags that differ from the package version. It reruns CI, downloads the
-tested artifact, verifies the checksums, and creates a GitHub release containing:
+After the version pull request passes CI and is merged, create and push its
+matching tag from that merged commit, for example `v0.1.3`. The release workflow
+rejects tags that differ from any package version. It reruns CI, downloads the
+tested artifact, verifies the checksums, and prepares a draft GitHub release
+containing:
 
 - `mariadb-wasm-bridge-VERSION.tar.gz`: JavaScript bridge, TypeScript definitions,
   native PDO driver source, documentation, and the pinned MariaDB WASM assets.
@@ -41,6 +60,14 @@ tested artifact, verifies the checksums, and creates a GitHub release containing
 - `bridge-manifest.json`: source commit, bridge/protocol/engine versions, and
   SHA-256 checksums of all files in the standalone archive.
 - `SHA256SUMS`: checksums of both archives and the manifest.
+
+All four assets are uploaded while the release is a draft. The publisher checks
+their names, sizes and GitHub-reported SHA-256 digests, verifies that the remote
+tag still points to the tested source commit, and only then publishes the
+release. This order supports release immutability: assets are complete before
+publication locks them. A retry resumes a partial draft only when existing assets
+match exactly. An already published release with the same complete asset set is
+accepted without changes; mismatched or additional assets stop publication.
 
 The workflow publishes to GitHub Releases. It does not publish to an npm
 registry, and requires no npm token. The GitHub token has write permission only
