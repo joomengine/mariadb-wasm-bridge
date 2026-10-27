@@ -23,7 +23,7 @@ export interface MariaDBOptions {
   maxQueuedBytes?: number;
   /** Browser IndexedDB store protected by an exclusive Web Lock. */
   persistence?: { key: string };
-  /** Upstream index.mjs URL; bare dependency in Node, vendor assets in browser by default. */
+  /** Defaults to the bundled vendor engine. Custom browser engines must bound pthread creation. */
   engineModuleUrl?: string | URL;
   /** Override the upstream engine WASM asset URL. */
   wasmUrl?: string | URL;

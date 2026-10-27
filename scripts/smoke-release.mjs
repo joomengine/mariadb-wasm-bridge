@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { releaseDir, run } from './release-utils.mjs';
@@ -9,12 +9,10 @@ const extracted = await mkdtemp(path.join(tmpdir(), 'mariadb-bridge-smoke-'));
 try {
   run('tar', ['-xzf', path.join(releaseDir, archiveName), '--no-same-owner', '--no-same-permissions', '-C', extracted]);
   const bundle = path.join(extracted, bundleName);
-  await writeFile(path.join(bundle, 'smoke.mjs'), `
+  const smoke = `
 import assert from 'node:assert/strict';
 import { createMariaDB } from './src/index.mjs';
-const db = await createMariaDB({
-  engineModuleUrl: new URL('./vendor/lite4mariadb/index.mjs', import.meta.url).href,
-});
+const db = await createMariaDB();
 try {
   const call = async (request) => {
     const response = JSON.parse(await db.hostCalls['mariadb.v1'](JSON.stringify({ version: 1, ...request })));
@@ -35,8 +33,18 @@ try {
   await db.close();
 }
 console.log('Standalone release executes real MariaDB queries without node_modules.');
-`);
+`;
+  await writeFile(path.join(bundle, 'smoke.mjs'), smoke);
   process.stdout.write(run(process.execPath, [path.join(bundle, 'smoke.mjs')], { cwd: bundle, timeout: 120_000 }));
+  const consumer = path.join(extracted, 'npm-consumer');
+  await mkdir(consumer);
+  await writeFile(path.join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
+  const npmName = archiveName.replace(/^mariadb-wasm-bridge-/, 'joomengine-mariadb-wasm-bridge-').replace(/\.tar\.gz$/, '.tgz');
+  run('npm', ['install', '--ignore-scripts', '--omit=dev', '--offline', '--no-audit', '--no-fund', '--package-lock=false', path.join(releaseDir, npmName)], { cwd: consumer });
+  await writeFile(path.join(consumer, 'smoke.mjs'), smoke
+    .replace("from './src/index.mjs'", "from '@joomengine/mariadb-wasm-bridge'")
+    .replace('Standalone release executes real MariaDB queries without node_modules.', 'Installed npm package executes real MariaDB with lifecycle scripts disabled and no upstream runtime dependency.'));
+  process.stdout.write(run(process.execPath, [path.join(consumer, 'smoke.mjs')], { cwd: consumer, timeout: 120_000 }));
 } finally {
   await rm(extracted, { recursive: true, force: true });
 }

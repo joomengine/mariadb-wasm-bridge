@@ -35,9 +35,25 @@ for (const browserName of browsers) {
     await page.goto(server.url);
     const options = {
       database: 'joomla',
-      engineModuleUrl: new URL('node_modules/lite4mariadb/dist/index.mjs', server.url).href,
+      engineModuleUrl: new URL('vendor/lite4mariadb/index.mjs', server.url).href,
       startupTimeoutMs: 120_000,
     };
+
+    await t.test('repeated immediate memory-only shutdown completes with bounded browser pthreads', async () => {
+      // The previous engine could exhaust its 16 preloaded pthreads during
+      // native shutdown, then deadlock waiting for a newly created browser
+      // Worker that needed the blocked creator to return to its event loop.
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const result = await page.evaluate(async options => {
+          const api = window.bridgeTest;
+          await api.open(options);
+          const result = await api.query('SELECT 42 AS answer');
+          await api.close();
+          return result;
+        }, options);
+        assert.equal(text(result.rows[0][0]), '42', `Immediate close iteration ${attempt + 1}`);
+      }
+    });
 
     await t.test('SQL preserves binary, Unicode, decimal, large integer and null values', async () => {
       const result = await page.evaluate(async options => {
@@ -157,7 +173,7 @@ for (const browserName of browsers) {
           } catch (error) {
             return { isolated: crossOriginIsolated, code: error.code, message: error.message };
           }
-        }, new URL('node_modules/lite4mariadb/dist/index.mjs', plainServer.url).href);
+        }, new URL('vendor/lite4mariadb/index.mjs', plainServer.url).href);
         assert.equal(result.isolated, false);
         assert.equal(result.code, 'CROSS_ORIGIN_ISOLATION_REQUIRED');
         assert.match(result.message, /isolat|SharedArrayBuffer|COOP|COEP/i);

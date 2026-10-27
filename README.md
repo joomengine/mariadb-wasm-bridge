@@ -19,8 +19,11 @@ installation or JCB compilation. Those are the next integration steps.
 
 ## Use from JavaScript
 
-Requires Node.js 24+ for development. Clone this repository and run `npm ci`.
-The entry point is `src/index.mjs`; release archives include browser engine assets.
+Requires Node.js 24+ for development. Clone this repository, run `npm ci`, then
+`npm run prepare:engine`. Tests and release packaging run preparation automatically.
+The entry point is `src/index.mjs`; npm packages and standalone release archives
+include the prepared engine under `vendor/lite4mariadb`, with no consumer build or
+postinstall step.
 
 ```js
 import { createMariaDB } from './src/index.mjs';
@@ -68,10 +71,10 @@ GitHub Pages cannot set these custom headers itself. The playground needs a test
 service-worker isolation strategy and request routing before Pages is supported.
 This bridge does not install or own that service worker.
 
-For npm-based browser builds, stage `node_modules/lite4mariadb/dist/` as static
-assets and set `engineModuleUrl` to its `index.mjs`. Release archives include
-`vendor/lite4mariadb/` and need no bundler. Related JS/WASM assets must satisfy
-worker origin/CORS policies.
+For npm-based browser builds, stage this package’s `src/` and prepared `vendor/`
+directories together as static assets. The default engine URL resolves relative
+to `src/engine.mjs`; release archives use the same layout and need no bundler.
+Related JS/WASM assets must satisfy worker origin/CORS policies.
 
 ## Compatibility boundaries
 
@@ -127,3 +130,20 @@ its exact version/hashes, then deploy after PHP/Joomla integration tests pass.
 Bridge source is Apache-2.0. The separately maintained MariaDB WASM dependency is
 GPL-2.0-only and retains its license. Bundling does not relicense upstream code.
 Release archives preserve notices and source provenance; see [NOTICE](NOTICE).
+
+## Browser pthread limit
+
+The bundled JavaScript uses Emscripten’s `PTHREAD_POOL_SIZE_STRICT=2` behavior:
+browsers use the 16 preloaded pthread workers and return `EAGAIN` if the pool is
+exhausted. MariaDB’s task pool handles that allocation failure using its existing
+workers. This prevents synchronous shutdown from waiting for a new browser worker
+that cannot initialize until the blocked creator returns to its event loop. Node
+keeps upstream dynamic worker creation. No database binary is changed.
+
+`npm run prepare:engine` verifies the exact upstream glue and WASM hashes before
+applying the reviewed JavaScript change. The package includes patch notices and
+hashes, also recorded in `bridge-manifest.json`. See [patches/NOTICE](patches/NOTICE).
+A custom `engineModuleUrl` must provide an engine with equivalent browser pthread
+exhaustion behavior; the unmodified lite4mariadb 0.1.2 browser module can deadlock
+during shutdown. Native thread-allocation errors remain possible for workloads
+that require more than the browser pool can provide.

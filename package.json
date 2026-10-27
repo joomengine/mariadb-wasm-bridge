@@ -1,6 +1,6 @@
 {
   "name": "@joomengine/mariadb-wasm-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MariaDB WebAssembly host bridge and native PDO driver for JoomEngine PHP",
   "type": "module",
   "license": "Apache-2.0",
@@ -25,21 +25,23 @@
     "docs",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "vendor",
+    "patches"
   ],
   "scripts": {
     "check": "node scripts/check.mjs",
     "test": "npm run check && npm run test:integration && npm run test:browser",
-    "test:integration": "node --test test/engine.test.mjs test/bridge.test.mjs",
-    "test:browser": "node --test test/browser.test.mjs",
+    "test:integration": "npm run prepare:engine && node --test test/engine-patch.test.mjs test/engine.test.mjs test/bridge.test.mjs",
+    "test:browser": "npm run prepare:engine && node --test test/browser.test.mjs",
     "release:package": "node scripts/package-release.mjs",
-    "test:native": "bash native/tests/run.sh && node --test native/tests/database.test.mjs"
-  },
-  "dependencies": {
-    "lite4mariadb": "0.1.2"
+    "test:native": "npm run prepare:engine && bash native/tests/run.sh && node --test native/tests/database.test.mjs",
+    "prepare:engine": "node scripts/prepare-engine.mjs",
+    "prepack": "npm run prepare:engine"
   },
   "devDependencies": {
     "playwright": "1.64.1",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "lite4mariadb": "0.1.2"
   }
 }

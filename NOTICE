@@ -3,7 +3,7 @@ Copyright 2026 JoomEngine contributors
 
 Bridge source is licensed under Apache License 2.0; see LICENSE.
 
-This project depends on and its browser release archives redistribute
+This project builds from and its npm and standalone release archives redistribute
 lite4mariadb 0.1.2, an independently maintained MariaDB WebAssembly build.
 Upstream: https://github.com/shyim/lite4mariadb
 npm: https://www.npmjs.com/package/lite4mariadb/v/0.1.2
@@ -21,3 +21,8 @@ Pinned upstream source revision for npm 0.1.2:
 Source: https://github.com/shyim/lite4mariadb/tree/24be9371a2f6c71250a2356631ad6feab2280b02
 Source archive: https://github.com/shyim/lite4mariadb/archive/24be9371a2f6c71250a2356631ad6feab2280b02.tar.gz
 Upstream build instructions are under wasm/ in that source tree.
+
+The redistributed generated JavaScript includes JoomEngine’s reviewed browser
+pthread-pool exhaustion guard, equivalent to PTHREAD_POOL_SIZE_STRICT=2.
+The upstream WASM binary is unchanged. See patches/NOTICE and the bundled
+joomengine-patches.json for modification details, licenses, and exact hashes.

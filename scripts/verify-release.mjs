@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hashFile, inventory, releaseDir, root, run } from './release-utils.mjs';
+import { enginePatch } from './prepare-engine.mjs';
 
 export async function verifyRelease() {
   const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -26,7 +27,7 @@ export async function verifyRelease() {
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.bridgeVersion, pkg.version);
   assert.equal(manifest.protocolVersion, 1);
-  assert.equal(manifest.engine.version, pkg.dependencies.lite4mariadb);
+  assert.equal(manifest.engine.version, pkg.devDependencies.lite4mariadb);
   assert.equal(manifest.phpDriver.sourceOnly, true);
   assert.ok(manifest.files['vendor/lite4mariadb/lite4mariadb.wasm'], 'Engine binary is missing from manifest');
   assert.ok(manifest.files['vendor/lite4mariadb/COPYING'], 'Engine license is missing from manifest');
@@ -56,11 +57,18 @@ export async function verifyRelease() {
     const npmPackage = JSON.parse(await readFile(path.join(extracted, 'package/package.json'), 'utf8'));
     assert.equal(npmPackage.name, pkg.name);
     assert.equal(npmPackage.version, pkg.version);
-    assert.equal(npmPackage.dependencies.lite4mariadb, manifest.engine.version);
+    assert.equal(npmPackage.devDependencies.lite4mariadb, manifest.engine.version);
+    assert.equal(npmPackage.dependencies, undefined, 'The npm runtime uses its prepared bundled engine');
+    const patchRecord = JSON.parse(await readFile(path.join(bundle, 'vendor/lite4mariadb/joomengine-patches.json'), 'utf8'));
+    assert.deepEqual(patchRecord, manifest.engine.threadingPatch, 'Threading patch provenance mismatch');
+    const { patchedSha256, ...configuration } = patchRecord;
+    assert.deepEqual(configuration, enginePatch, 'Unexpected engine modification');
+    assert.equal(manifest.files['vendor/lite4mariadb/lite4mariadb.js'].sha256, patchedSha256);
+    assert.equal(manifest.files['vendor/lite4mariadb/lite4mariadb.wasm'].sha256, enginePatch.wasmSha256, 'The upstream WASM must remain unchanged');
     const npmFiles = await inventory(path.join(extracted, 'package'));
     delete npmFiles['package.json'];
-    const sharedFiles = Object.fromEntries(Object.entries(manifest.files).filter(([name]) => !name.startsWith('vendor/')));
-    assert.deepEqual(npmFiles, sharedFiles, 'npm package must contain the same bridge, driver source, types, and documentation as the standalone archive');
+    const sharedFiles = manifest.files;
+    assert.deepEqual(npmFiles, sharedFiles, 'npm package must contain the same bridge, prepared engine, driver source, types, and documentation as the standalone archive');
     return { manifest, bundleName, archiveName };
   } finally {
     await rm(extracted, { recursive: true, force: true });

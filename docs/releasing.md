@@ -36,8 +36,8 @@ tested artifact, verifies the checksums, and creates a GitHub release containing
 
 - `mariadb-wasm-bridge-VERSION.tar.gz`: JavaScript bridge, TypeScript definitions,
   native PDO driver source, documentation, and the pinned MariaDB WASM assets.
-- `joomengine-mariadb-wasm-bridge-VERSION.tgz`: the npm-format bridge package;
-  installing it resolves the exact declared `lite4mariadb` dependency.
+- `joomengine-mariadb-wasm-bridge-VERSION.tgz`: the npm-format bridge package
+  including the same prepared MariaDB engine, with no runtime npm dependency.
 - `bridge-manifest.json`: source commit, bridge/protocol/engine versions, and
   SHA-256 checksums of all files in the standalone archive.
 - `SHA256SUMS`: checksums of both archives and the manifest.
@@ -55,3 +55,16 @@ own build. It should record the exact tag and manifest checksums, test that
 bridge/engine/PHP/Joomla combination, and only deploy a passing build. Browser
 visits should use those staged assets, without resolving mutable branches or
 latest-release URLs at runtime.
+
+## Prepared engine provenance
+
+The upstream `lite4mariadb` npm package is a build dependency. Engine preparation
+checks its fixed JavaScript and WASM SHA-256 values, applies the documented browser
+pthread exhaustion guard, and copies the unchanged binary and GPL notice into
+`vendor/lite4mariadb`. Both npm and standalone archives contain exactly this
+prepared engine; consumers do not run a postinstall hook. `engine.threadingPatch`
+in the release manifest records the original and transformed glue hashes,
+unchanged binary hash, upstream commit, and strict browser pool settings.
+Changing the pinned upstream version requires reviewing and updating the transform,
+then passing allocator-boundary, repeated browser-shutdown, SQL, persistence, and
+release-parity tests. Do not silently copy an unreviewed engine into a release.
