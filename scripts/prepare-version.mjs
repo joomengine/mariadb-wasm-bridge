@@ -1,0 +1,22 @@
+import { writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { compareVersions, readReleaseIdentity, stableVersion } from './release-version.mjs';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+if (process.argv.length !== 3) throw new Error('Usage: npm run release:prepare -- <stable-version>');
+const version = stableVersion(process.argv[2]);
+const identity = await readReleaseIdentity(root);
+if (compareVersions(version, identity.version) <= 0) throw new Error(`The new version must be greater than ${identity.version}.`);
+const tag = `v${version}`;
+const found = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/tags/${tag}`], { cwd: root });
+if (found.error) throw found.error;
+if (found.status === 0) throw new Error(`${tag} already exists. Choose the next unused stable version.`);
+if (found.status !== 1) throw new Error(`Cannot inspect existing tags: ${found.stderr.toString().trim()}`);
+identity.pkg.version = version;
+identity.lock.version = version;
+identity.lock.packages[''].version = version;
+await writeFile(path.join(root, 'package.json'), `${JSON.stringify(identity.pkg, null, 2)}\n`);
+await writeFile(path.join(root, 'package-lock.json'), `${JSON.stringify(identity.lock, null, 2)}\n`);
+console.log(`Prepared ${tag}. Commit and merge these version files, then create the tag from that commit.`);
