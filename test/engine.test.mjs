@@ -4,6 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { createHash } from 'node:crypto';
+import { createEngine } from '../src/engine.mjs';
 
 // Each engine belongs to a worker: the upstream server retains pthread workers
 // after shutdown, and separate workers also isolate its global connection.
@@ -68,6 +70,51 @@ test('real MariaDB supports rollback and reports server errors', { timeout: 60_0
   `);
   assert.deepEqual(result.rows, [{ count: '0' }]);
   assert.deepEqual(result.sqlError, { errno: 1146, sqlstate: '42S02' });
+});
+
+test('real MariaDB accepts extension-sized SQL without consuming the C stack', { timeout: 60_000 }, async () => {
+  const result = await runEngine(`
+    engine.query('CREATE TABLE large_sql (id INT PRIMARY KEY, body LONGTEXT, payload LONGBLOB) ENGINE=InnoDB');
+    const text = 'é🐱'.repeat(180000);
+    const binary = '00ff80'.repeat(44000);
+    const large = "INSERT INTO large_sql VALUES (1, '" + text + "', X'" + binary + "')";
+    engine.query(large);
+    const value = engine.query('SELECT LENGTH(body) AS bytes, CHAR_LENGTH(body) AS characters, MD5(body) AS digest, LENGTH(payload) AS binary_bytes, HEX(SUBSTRING(payload, 1, 3)) AS prefix FROM large_sql WHERE id=1').rows;
+    const row = 'x'.repeat(5000);
+    const tuples = Array.from({length:200}, (_, i) => '(' + (i+2) + ", '" + row + "', NULL)");
+    engine.query('INSERT INTO large_sql VALUES ' + tuples.join(','));
+    let error;
+    try { engine.query("INSERT INTO large_sql VALUES (1, '" + text + "', NULL)"); }
+    catch (cause) { error = { errno:cause.errno, sqlstate:cause.sqlstate }; }
+    return { value, error, count:engine.query('SELECT COUNT(*) AS count FROM large_sql').rows };
+  `);
+  assert.deepEqual(result.value, [{ bytes: '1080000', characters: '360000',
+    digest: createHash('md5').update('é🐱'.repeat(180000)).digest('hex'), binary_bytes: '132000', prefix: '00FF80' }]);
+  assert.deepEqual(result.error, { errno: 1062, sqlstate: '23000' });
+  assert.deepEqual(result.count, [{ count: '201' }]);
+});
+
+test('heap SQL transport releases allocated input on encoding and native failures', async () => {
+  for (const failure of ['allocation', 'encoding', 'query', 'result']) {
+    const engineModuleUrl = 'data:text/javascript,' + encodeURIComponent(`
+      export const freed = [];
+      const mod = {
+        lengthBytesUTF8: value => value.length,
+        _malloc: () => ${failure === 'allocation' ? '0' : '1024'},
+        _free: pointer => freed.push(pointer),
+        stringToUTF8: () => { ${failure === 'encoding' ? 'throw new Error("Encoding failed");' : ''} },
+        _l4m_query: () => { ${failure === 'query' ? 'throw new Error("Native query failed");' : 'return 0;'} },
+      };
+      export const Lite4MariaDB = {create: async () => ({mod, close:async()=>{}})};
+    `);
+    const { freed } = await import(engineModuleUrl);
+    const engine = await createEngine({ engineModuleUrl });
+    try {
+      assert.throws(() => engine.query('SELECT 1'), failure === 'allocation'
+        ? error => error.sqlstate === 'HY001' : /failed|empty result pointer/);
+      assert.deepEqual(freed, failure === 'allocation' ? [] : [1024]);
+    } finally { await engine.close(); }
+  }
 });
 
 test('embedded NUL and use after close fail explicitly', { timeout: 60_000 }, async () => {
