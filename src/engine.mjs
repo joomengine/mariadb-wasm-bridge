@@ -7,7 +7,7 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
   if (typeof dataDir !== 'string' || !dataDir || dataDir.includes('\0')) {
     throw new TypeError('dataDir must be a non-empty string without NUL bytes');
   }
-  const moduleUrl = engineModuleUrl ?? (isNode ? 'lite4mariadb' : new URL('../vendor/lite4mariadb/index.mjs', import.meta.url).href);
+  const moduleUrl = engineModuleUrl ?? new URL('../vendor/lite4mariadb/index.mjs', import.meta.url).href;
   const { Lite4MariaDB } = await import(moduleUrl);
   const options = { dataDir };
   if (wasmUrl !== undefined) {

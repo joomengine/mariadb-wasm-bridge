@@ -1,0 +1,33 @@
+JoomEngine modification to lite4mariadb 0.1.2 generated JavaScript
+Copyright 2026 JoomEngine contributors
+
+Upstream source: https://github.com/shyim/lite4mariadb/tree/24be9371a2f6c71250a2356631ad6feab2280b02
+License: the redistributed upstream engine and this generated JavaScript
+modification retain GPL-2.0-only; see vendor/lite4mariadb/COPYING.
+
+patches/browser-pthread-pool.mjs applies one exact, SHA-256-guarded change to
+PThread.getNewWorker in lite4mariadb.js. In browsers an exhausted pool returns
+undefined instead of allocating an unloaded Worker. The caller already maps
+that result to pthread_create EAGAIN. This matches Emscripten's supported
+PTHREAD_POOL_SIZE_STRICT=2 behavior, retaining dynamic worker creation in Node.
+
+The upstream build uses PTHREAD_POOL_SIZE=16 and PTHREAD_POOL_SIZE_STRICT=0.
+MariaDB's internal task pool can request additional workers while synchronous
+native shutdown waits for tasks to finish. Browser workers created at that point
+cannot initialize until the blocked creator returns to its event loop, causing
+a shutdown deadlock. Returning EAGAIN lets MariaDB's task pool undo the failed
+worker allocation and continue using its initialized workers.
+
+Reference: Emscripten src/lib/libpthread.js, PThread.getNewWorker
+https://github.com/emscripten-core/emscripten/blob/6.0.6/src/lib/libpthread.js
+
+The WebAssembly binary, SQL engine, native PDO source, upstream npm package,
+and lockfile package-integrity hash are not modified. joomengine-patches.json
+and the release manifest record the original and transformed glue SHA-256
+values and the unchanged WASM SHA-256. Ship this notice with the engine.
+
+Reproduce the transformation from the original upstream npm package without
+installing any dependencies:
+node patches/browser-pthread-pool.mjs upstream/lite4mariadb.js prepared/lite4mariadb.js
+
+This self-contained transformation source ships in both release archives.

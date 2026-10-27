@@ -2,11 +2,14 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { hashFile, inventory, releaseDir, root, run } from './release-utils.mjs';
+import { prepareEngine, vendorDirectory } from './prepare-engine.mjs';
+
+const threadingPatch = await prepareEngine();
 
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
 const engine = JSON.parse(await readFile(path.join(root, 'node_modules/lite4mariadb/package.json'), 'utf8'));
-if (pkg.dependencies.lite4mariadb !== engine.version || lock.packages['node_modules/lite4mariadb'].version !== engine.version) {
+if (pkg.devDependencies.lite4mariadb !== engine.version || lock.packages['node_modules/lite4mariadb'].version !== engine.version) {
   throw new Error('Installed engine differs from the locked release dependency; run npm ci');
 }
 if (lock.version !== pkg.version || lock.packages[''].version !== pkg.version) throw new Error('Package version mismatch');
@@ -19,18 +22,14 @@ const bundleName = `mariadb-wasm-bridge-${pkg.version}`;
 const bundle = path.join(staging, bundleName);
 try {
   await mkdir(bundle);
-  for (const name of ['src', 'types', 'native', 'docs', 'README.md', 'LICENSE', 'NOTICE']) {
+  for (const name of ['src', 'types', 'native', 'docs', 'patches', 'README.md', 'LICENSE', 'NOTICE']) {
     await cp(path.join(root, name), path.join(bundle, name), {
       recursive: true,
       filter: source => !/(?:^|\/)(?:\.build|\.libs|\.native-build|autom4te\.cache)(?:\/|$)|\.(?:so|o|lo|la)$/.test(source),
     });
   }
   const vendor = path.join(bundle, 'vendor/lite4mariadb');
-  await cp(path.join(root, 'node_modules/lite4mariadb/dist'), vendor, { recursive: true });
-  await cp(path.join(root, 'node_modules/lite4mariadb/COPYING'), path.join(vendor, 'COPYING'));
-  // The upstream ESM wrapper also imports its generated .js module. Its package
-  // type must remain explicit when the standalone bundle is extracted elsewhere.
-  await writeFile(path.join(vendor, 'package.json'), `${JSON.stringify({ name: engine.name, version: engine.version, type: 'module', license: engine.license }, null, 2)}\n`);
+  await cp(vendorDirectory, vendor, { recursive: true });
   const manifest = {
     schemaVersion: 1,
     bridgeVersion: pkg.version,
@@ -41,6 +40,7 @@ try {
       version: engine.version,
       license: engine.license,
       integrity: lock.packages['node_modules/lite4mariadb'].integrity,
+      threadingPatch,
     },
     phpDriver: { module: 'pdo_mariadb_wasm', pdoName: 'mysql', sourceOnly: true },
     files: await inventory(bundle),
