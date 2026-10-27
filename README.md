@@ -2,8 +2,8 @@
 
 A versioned MariaDB WebAssembly bridge and native PDO driver source for
 [JoomEngine PHP WASM](https://github.com/joomengine/php-wasm). SQL executes in
-real MariaDB through [lite4mariadb](https://github.com/shyim/lite4mariadb); there
-is no SQLite translation, database service, Docker runtime or WordPress dependency.
+real MariaDB through [lite4mariadb](https://github.com/shyim/lite4mariadb), without
+SQLite translation, an external database service or a Docker runtime.
 
 ## Implementation status
 
