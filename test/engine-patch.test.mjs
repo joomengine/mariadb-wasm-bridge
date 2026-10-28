@@ -41,3 +41,13 @@ test('the actual prepared allocator bounds browsers and retains Node worker crea
   assert.equal(allocated, 1, 'Node retains supported dynamic worker creation');
   assert.equal(loaded, 1);
 });
+
+test('browser engine scheduling stays inside its fixed pthread capacity', () => {
+  const expression = prepared.match(/var _emscripten_num_logical_cores=\(\)=>(.*?);/)?.[1];
+  assert.ok(expression);
+  const cores = new Function('ENVIRONMENT_IS_NODE', 'navigator', 'require', `return ${expression};`);
+  for (const [hardwareConcurrency, expected] of [[1, 1], [2, 2], [8, 4], [128, 4], [undefined, 1]]) {
+    assert.equal(cores(false, { hardwareConcurrency }, () => { throw new Error('Node branch must not run'); }), expected);
+  }
+  assert.equal(cores(true, {}, () => ({ cpus: () => new Array(64) })), 64);
+});

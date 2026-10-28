@@ -5,7 +5,7 @@ Upstream source: https://github.com/shyim/lite4mariadb/tree/24be9371a2f6c71250a2
 License: the redistributed upstream engine and this generated JavaScript
 modification retain GPL-2.0-only; see vendor/lite4mariadb/COPYING.
 
-patches/browser-pthread-pool.mjs applies one exact, SHA-256-guarded change to
+patches/browser-pthread-pool.mjs applies exact, SHA-256-guarded changes to
 PThread.getNewWorker in lite4mariadb.js. In browsers an exhausted pool returns
 undefined instead of allocating an unloaded Worker. The caller already maps
 that result to pthread_create EAGAIN. This matches Emscripten's supported
@@ -31,3 +31,11 @@ installing any dependencies:
 node patches/browser-pthread-pool.mjs upstream/lite4mariadb.js prepared/lite4mariadb.js
 
 This self-contained transformation source ships in both release archives.
+
+The browser-only logical CPU scheduling budget is capped at four. InnoDB's
+native generic pool targets twice the reported concurrency; the fixed 16-worker
+browser budget must also serve its background services. The Node core count is
+unchanged. This scheduling cap avoids asking the strict browser pool to create
+workers beyond its capacity and does not change the upstream WASM binary.
+Reference: tpool/tpool_generic.cc, thread_pool_generic::set_concurrency at
+https://github.com/shyim/lite4mariadb/blob/24be9371a2f6c71250a2356631ad6feab2280b02/tpool/tpool_generic.cc

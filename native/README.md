@@ -83,7 +83,7 @@ $value = $statement->fetchColumn();
 
 The local endpoint aliases `localhost` and `127.0.0.1` are also accepted for
 Joomla configuration. These identify the embedded engine; they never open a
-network connection. Custom network ports, Unix sockets and other charsets are
+network connection. The DSN accepts `utf8mb4` (the default), `utf8mb3`, and its `utf8` alias. The latter two negotiate actual three-byte UTF-8 with MariaDB; they do not enable supplementary Unicode characters. Custom network ports, Unix sockets and other charsets are
 rejected. The host enforces its supported user/password and connection lease.
 
 ## Supported behavior and boundaries
@@ -94,7 +94,7 @@ rejected. The host enforces its supported user/password and connection lease.
   apostrophes and escaping backslashes/control bytes. This preserves Joomla's
   `MysqlDriver::escape()` behavior, which strips the surrounding PDO quotes.
   Binary LOB parameters use hex SQL literals.
-- The host reasserts `utf8mb4` and removes `NO_BACKSLASH_ESCAPES` before every
+- The host reasserts the negotiated UTF-8 charset and removes `NO_BACKSLASH_ESCAPES` before every
   application query, preserving the remaining SQL modes. Applications requiring
   that mode are unsupported. This is necessary to keep PHP's emulated parameter
   parser, string escaping and MariaDB's SQL interpretation consistent.

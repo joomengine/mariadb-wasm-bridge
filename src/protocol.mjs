@@ -18,6 +18,7 @@ export class MariaDBProtocol {
     this.quotedDatabase = identifier(database);
     this.serverVersion = serverVersion;
     this.connection = null;
+    this.charset = 'utf8mb4';
   }
 
   /** All host calls return a versioned JSON envelope, including failures. */
@@ -50,12 +51,15 @@ export class MariaDBProtocol {
     if (this.connection !== null) fail('CONNECTION_IN_USE', 'The embedded MariaDB connection is already leased', '08004');
     if ((payload.database ?? this.database) !== this.database) fail('DATABASE_MISMATCH', 'The requested database does not match this bridge instance', '3D000');
     if (!['', 'root'].includes(payload.user ?? '') || (payload.password ?? '') !== '') fail('UNSUPPORTED_CREDENTIALS', 'Embedded MariaDB accepts only an empty password and the root or empty user', '28000');
-    if ((payload.charset ?? 'utf8mb4') !== 'utf8mb4') fail('UNSUPPORTED_CHARSET', 'The bridge requires utf8mb4', 'HYC00');
+    const requestedCharset = payload.charset ?? 'utf8mb4';
+    if (!['utf8', 'utf8mb3', 'utf8mb4'].includes(requestedCharset)) fail('UNSUPPORTED_CHARSET', 'The bridge supports utf8mb3 and utf8mb4', 'HYC00');
+    const charset = requestedCharset === 'utf8' ? 'utf8mb3' : requestedCharset;
     await this.engine.query('ROLLBACK');
     await this.engine.query('SET autocommit=1');
-    await this.engine.query('SET NAMES utf8mb4');
+    await this.engine.query(`SET NAMES ${charset}`);
     await this.engine.query(`USE ${this.quotedDatabase}`);
     await this.engine.query('SELECT LAST_INSERT_ID(0)');
+    this.charset = charset;
     this.connection = globalThis.crypto.randomUUID();
     return { connection: this.connection, serverVersion: this.serverVersion };
   }
@@ -69,9 +73,9 @@ export class MariaDBProtocol {
   async query(payload) {
     this.requireConnection(payload.connection);
     if (typeof payload.sql !== 'string' || !payload.sql.trim()) fail('INVALID_QUERY', 'SQL must be a non-empty string', '42000');
-    // Results cross the upstream ABI as UTF-8 JSON. Reassert this even after a
-    // previous caller changed connection settings with SQL.
-    await this.engine.query('SET NAMES utf8mb4');
+    // Both supported connection charsets cross the engine ABI as valid UTF-8.
+    // Preserve the negotiated charset after application SQL changes it.
+    await this.engine.query(`SET NAMES ${this.charset}`);
     // Joomla's MySQL query builder strips the outer quotes from PDO::quote().
     // Its driver therefore needs conventional MySQL backslash escaping, whose
     // meaning must not change when application SQL enables NO_BACKSLASH_ESCAPES.
