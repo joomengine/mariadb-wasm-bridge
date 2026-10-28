@@ -83,6 +83,28 @@ test('protocol validates version, database, credentials, charset and exclusive l
   } finally { await database.close(); }
 });
 
+test('UTF-8 DSN charsets negotiate real server semantics and survive SQL overrides', timeout, async () => {
+  const database = await createMariaDB();
+  try {
+    for (const [requested, expected] of [['utf8', 'utf8mb3'], ['utf8mb3', 'utf8mb3'], ['utf8mb4', 'utf8mb4']]) {
+      const opened = await request(database, { op: 'connect', charset: requested });
+      assert.equal(opened.ok, true, JSON.stringify(opened));
+      const connection = opened.result.connection;
+      const selected = await execute(database, connection, "SELECT @@character_set_client AS client_charset, @@character_set_connection AS connection_charset, @@character_set_results AS result_charset, 'café 中文' AS label");
+      assert.deepEqual(selected.rows[0].map(decode), [expected, expected, expected, 'café 中文']);
+      await execute(database, connection, 'SET NAMES latin1');
+      const restored = await execute(database, connection, 'SELECT @@character_set_client AS client_charset');
+      assert.equal(decode(restored.rows[0][0]), expected);
+      await execute(database, connection, 'CREATE TABLE IF NOT EXISTS charset_values (label VARCHAR(50) CHARACTER SET utf8mb4)');
+      await execute(database, connection, "SET SESSION sql_mode='STRICT_ALL_TABLES'");
+      const supplementary = await request(database, { op: 'query', connection, sql: "INSERT INTO charset_values VALUES ('🚀')" });
+      assert.equal(supplementary.ok, expected === 'utf8mb4', JSON.stringify(supplementary));
+      if (!supplementary.ok) assert.match(supplementary.error.sqlstate, /^(?:22007|HY000)$/);
+      assert.equal((await request(database, { op: 'close', connection })).ok, true);
+    }
+  } finally { await database.close(); }
+});
+
 test('reset rolls back pending work, clears the lease and retains committed data', timeout, async () => {
   const database = await createMariaDB();
   try {

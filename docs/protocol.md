@@ -19,7 +19,7 @@ JavaScript lifecycle calls (`flush`, `reset`, `close`) reject on failure.
 
 | Operation | Request properties | Success result |
 | --- | --- | --- |
-| `connect` | `database` (defaults to configured database), `user` (root/empty), `password` (empty), `charset` (utf8mb4) | `connection` opaque string; `serverVersion` string |
+| `connect` | `database` (defaults to configured database), `user` (root/empty), `password` (empty), `charset` (`utf8mb4` default; `utf8mb3` or `utf8` also accepted) | `connection` opaque string; `serverVersion` string |
 | `query` | `connection`, `sql` (one statement) | Columns, positional rows, affected rows, insert ID and transaction state |
 | `close` | `connection` | Empty object, after rollback and lease release |
 

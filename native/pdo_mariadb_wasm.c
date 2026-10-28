@@ -295,7 +295,7 @@ static zend_long wm_exec(pdo_dbh_t *dbh, const zend_string *sql)
 }
 
 /* Text must be a conventional quoted literal: Joomla's MysqlDriver::escape()
- * strips its first/last quote. The host enforces utf8mb4 and removes the
+ * strips its first/last quote. The host enforces the negotiated UTF-8 charset and removes the
  * NO_BACKSLASH_ESCAPES mode before each SQL query. LOBs use binary hex. */
 static zend_string *wm_quote(pdo_dbh_t *dbh, const zend_string *input, enum pdo_param_type type)
 {
@@ -546,7 +546,7 @@ static int wm_factory(pdo_dbh_t *dbh, zval *options)
         {"port", "3306", 0}, {"unix_socket", "", 0},
     };
     php_pdo_parse_data_source(dbh->data_source, dbh->data_source_len, fields, 5);
-    bool valid = strcmp(fields[1].optval, "utf8mb4") == 0 &&
+    bool valid = (strcmp(fields[1].optval, "utf8mb4") == 0 || strcmp(fields[1].optval, "utf8mb3") == 0 || strcmp(fields[1].optval, "utf8") == 0) &&
         (strcmp(fields[2].optval, "mariadb-wasm") == 0 || strcmp(fields[2].optval, "localhost") == 0 || strcmp(fields[2].optval, "127.0.0.1") == 0) &&
         strcmp(fields[3].optval, "3306") == 0 && fields[4].optval[0] == '\0';
     zval request, result;
@@ -558,7 +558,7 @@ static int wm_factory(pdo_dbh_t *dbh, zval *options)
     for (int i = 0; i < 5; i++) if (fields[i].freeme) efree(fields[i].optval);
     if (!valid) {
         zval_ptr_dtor(&request);
-        wm_error(dbh, NULL, "HYC00", 0, "Only the local embedded endpoint and utf8mb4 are supported");
+        wm_error(dbh, NULL, "HYC00", 0, "Only the local embedded endpoint and UTF-8 charsets are supported");
         goto failure;
     }
     bool success = wm_call(dbh, NULL, &request, &result);

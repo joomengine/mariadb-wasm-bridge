@@ -91,4 +91,10 @@ gc_collect_cycles();
 $db=new PDO('mysql:dbname=joomla','root','',[PDO::ATTR_STRINGIFY_FETCHES=>true]);
 same('42',$db->query('SELECT 42')->fetchColumn(),'constructor stringify option');
 unset($db);
+foreach (['utf8' => 'utf8mb3', 'utf8mb3' => 'utf8mb3', 'utf8mb4' => 'utf8mb4'] as $requested => $negotiated) {
+    $db = new PDO('mysql:dbname=joomla;charset=' . $requested, 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    same($negotiated, $db->query('SELECT @@character_set_connection')->fetchColumn(), 'negotiated PDO charset');
+    same('café 中文', $db->query("SELECT 'café 中文'")->fetchColumn(), 'UTF-8 PDO round trip');
+    unset($db);
+}
 echo json_encode(['type'=>'complete','assertions'=>$assertions],JSON_THROW_ON_ERROR),"\n";

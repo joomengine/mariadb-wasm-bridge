@@ -9,7 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const enginePatch = Object.freeze({
-  id: 'browser-pthread-pool-strict-2',
+  id: 'browser-pthread-pool-strict-2-cpu-4',
   upstreamVersion: '0.1.2',
   upstreamSourceCommit: '24be9371a2f6c71250a2356631ad6feab2280b02',
   file: 'lite4mariadb.js',
@@ -17,6 +17,7 @@ export const enginePatch = Object.freeze({
   wasmSha256: '1dcd5bf92685ebe37b4fc49e2fb5f57f05cef26c7e884c6ead98b2892dd59fde',
   browserPthreadPoolSize: 16,
   browserPthreadPoolSizeStrict: 2,
+  browserLogicalCpuBudget: 4,
 });
 const hash = value => createHash('sha256').update(value).digest('hex');
 const originalAllocator = 'getNewWorker(){if(PThread.unusedWorkers.length==0){var newWorker=PThread.allocateUnusedWorker();PThread.loadWasmModuleToWorker(newWorker)}return PThread.unusedWorkers.pop()}';
@@ -29,7 +30,13 @@ export function patchEngineSource(source) {
   // preloaded worker or return EAGAIN. Dynamically created browser workers need
   // the creator event loop, which synchronous native shutdown cannot service.
   // Node can start workers while the creator blocks, so retain its upstream path.
-  return source.replace(originalAllocator, strictAllocator);
+  const originalCores = 'var _emscripten_num_logical_cores=()=>ENVIRONMENT_IS_NODE?require("node:os").cpus().length:navigator["hardwareConcurrency"];';
+  const boundedCores = 'var _emscripten_num_logical_cores=()=>ENVIRONMENT_IS_NODE?require("node:os").cpus().length:Math.max(1,Math.min(4,navigator["hardwareConcurrency"]||1));';
+  assert.equal(source.split(originalCores).length, 2, 'Expected exactly one upstream logical-core query');
+  // InnoDB targets twice this CPU count. Reserve pthread capacity for its
+  // background services rather than oversubscribing the fixed browser pool.
+  return '/* Modified by JoomEngine: bounded browser pthread allocation and CPU scheduling. See JOOMENGINE-NOTICE. */\n'
+    + source.replace(originalAllocator, strictAllocator).replace(originalCores, boundedCores);
 }
 
 
