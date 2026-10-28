@@ -9,22 +9,21 @@ native PDO extension built from the included driver source.
 Use the Node.js version in [.node-version](../.node-version) for local validation
 and release preparation. CI uses the same exact version for every Node job.
 
-Version 0.1.3 is prepared in the package metadata. After its pull request is
-merged, create the matching `v0.1.3` tag from that merged commit. For the next
-release, prepare its newer version in a reviewed pull request before tagging:
+Prepare a release with one command (using the next unused stable version):
 
 ```bash
 git fetch origin --tags
-npm run release:prepare -- 0.1.4
+npm run release:prepare -- 0.1.5
 npm run check
-node scripts/verify-tag.mjs v0.1.4
+node scripts/verify-tag.mjs v0.1.5
 ```
 
-The preparation command updates the package version and both lockfile root
-versions together. It requires a newer stable version and rejects a tag already
-present locally. Commit those changes and merge them before tagging. If a tag
-was created with inconsistent metadata, leave it intact and prepare the next
-unused version instead.
+The preparation command updates `package.json` and both lockfile root versions
+together. If you already edited `package.json`, run it with that same version to
+synchronize the lockfile. It also repairs mismatched metadata when preparing a
+newer version, rejects downgrades, and rejects tags already present locally.
+Commit those changes and merge them before tagging. If a tag was created with
+inconsistent metadata, leave it intact and prepare the next unused version instead.
 
 Before tagging, run:
 
@@ -51,7 +50,7 @@ a temporary directory and runs real database queries without `node_modules`.
 A missing browser, native build failure, or engine startup failure fails CI.
 
 After the version pull request passes CI and is merged, create and push its
-matching tag from that merged commit, for example `v0.1.3`. The release workflow
+matching tag from that merged commit, for example `v0.1.5`. The release workflow
 rejects tags that differ from any package version. It reruns CI, downloads the
 tested artifact, verifies the checksums, and prepares a draft GitHub release
 containing:
