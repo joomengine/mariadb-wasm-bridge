@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { compareVersions, readReleaseIdentity, stableVersion, verifyTag } from '../scripts/release-version.mjs';
 import { checkReleaseAssets } from '../scripts/release-assets.mjs';
@@ -48,4 +49,34 @@ test('release upload verification rejects changed assets and resumes matching dr
     { ...asset(first), name: 'extra.zip' },
   ]) assert.throws(() => checkReleaseAssets([first], { assets: [invalid] }), /differs/);
   assert.throws(() => checkReleaseAssets([first], { assets: [asset(first), asset(first)] }), /differs/);
+});
+
+test('release preparation repairs manual bumps and rejects downgrades and existing tags', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'bridge-prepare-'));
+  try {
+    await mkdir(path.join(directory, 'scripts'));
+    for (const name of ['prepare-version.mjs', 'release-version.mjs']) {
+      await writeFile(path.join(directory, 'scripts', name), await readFile(new URL(`../scripts/${name}`, import.meta.url)));
+    }
+    const git = (...args) => spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+    assert.equal(git('init').status, 0);
+    await writeFile(path.join(directory, 'package.json'), JSON.stringify({ version: '0.1.4' }));
+    await writeFile(path.join(directory, 'package-lock.json'), JSON.stringify({ version: '0.1.3', packages: { '': { version: '0.1.3' }, dependency: { version: '1.0.0' } } }));
+    const prepare = version => spawnSync(process.execPath, ['scripts/prepare-version.mjs', version], { cwd: directory, encoding: 'utf8' });
+    assert.equal(prepare('0.1.4').status, 0);
+    assert.equal((await readReleaseIdentity(directory)).version, '0.1.4');
+    assert.notEqual(prepare('0.1.3').status, 0);
+    assert.equal(git('add', '.').status, 0);
+    assert.equal(git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture').status, 0);
+    assert.equal(git('tag', 'v0.1.4').status, 0);
+    assert.notEqual(prepare('0.1.4').status, 0);
+    // Recover the exact failed-release state while moving to the next version.
+    const lock = JSON.parse(await readFile(path.join(directory, 'package-lock.json'), 'utf8'));
+    lock.version = lock.packages[''].version = '0.1.3';
+    await writeFile(path.join(directory, 'package-lock.json'), JSON.stringify(lock));
+    assert.equal(prepare('0.1.5').status, 0);
+    const identity = await readReleaseIdentity(directory);
+    assert.equal(identity.version, '0.1.5');
+    assert.equal(identity.lock.packages.dependency.version, '1.0.0');
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
