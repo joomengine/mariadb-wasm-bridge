@@ -82,9 +82,15 @@ execution. See [docs/integration.md](docs/integration.md).
 
 Use `persistence: { key: 'site-unique-key' }` for IndexedDB. Each key has an
 exclusive Web Lock; another tab cannot open it concurrently. Use a separate key
-for each playground site/version. Call `flush()` at checkpoints and `close()`
+for each playground site/version. `flush()` checkpoints dirty InnoDB pages before
+copying the filesystem into IndexedDB, and keeps the database queue held until
+both operations finish. Await it before reporting a save as successful: a
+completed save can reopen after a whole-page reload without calling `close()`.
+Checkpoint and storage errors reject the save. Use `close()` for orderly shutdown
 while the page is active. Browser storage is not a backup; unload handlers cannot
-guarantee a completed flush.
+guarantee a completed flush. Database startup failures retain bounded native
+diagnostics alongside the original error so damaged or unavailable storage can
+be investigated without deleting saved data.
 
 MariaDB uses pthreads and requires a secure context, `SharedArrayBuffer` and
 cross-origin isolation. A conventional static host needs these response headers:

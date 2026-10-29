@@ -33,7 +33,7 @@ export interface MariaDBBridge {
   readonly serverVersion: string;
   /** Pass to createPhpWasmAdapter(), or forward through a PHP worker RPC channel. */
   readonly hostCalls: Readonly<{ 'mariadb.v1': (payloadJSON: string) => Promise<string> }>;
-  /** Explicit durability boundary for browser persistence. */
+  /** Checkpoint InnoDB and persist browser storage; rejects if either stage fails. */
   flush(): Promise<void>;
   /** Roll back and close all sessions after every completed CGI request or abandoned execution. */
   reset(): Promise<void>;
