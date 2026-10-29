@@ -1,6 +1,6 @@
 {
   "name": "@joomengine/mariadb-wasm-bridge",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "MariaDB WebAssembly engine and native PDO extension for upstream PHP WASM",
   "type": "module",
   "license": "Apache-2.0",

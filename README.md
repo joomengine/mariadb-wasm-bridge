@@ -178,6 +178,11 @@ so large values should use bounded batches or chunks. The WASM heap can grow to
 2 GiB, including engine structures and data pages; browser storage quota and
 PHP's separate memory budget also apply.
 
+When InnoDB waits for a redo checkpoint, the WebAssembly build yields before
+retrying. This lets background checkpoint writes acquire the shared latch and
+complete proxied filesystem operations. MariaDB retains its transaction and
+durability semantics.
+
 The engine uses 16 preloaded pthread workers and returns `EAGAIN` on exhaustion.
 Browser logical CPU scheduling remains capped at four to reserve capacity for
 background services. Row and metadata lock waits default to five seconds so a

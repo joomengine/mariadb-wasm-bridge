@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { createHash } from 'node:crypto';
+import { crc32 } from 'node:zlib';
 import { createEngine } from '../src/engine.mjs';
 
 // Each engine belongs to a worker: the upstream server retains pthread workers
 // after shutdown, and separate workers also isolate its global connection.
-async function runEngine(code, dataDir = 'memory://') {
+async function runEngine(code, dataDir = 'memory://', deadlineMs = 60_000) {
   const engineUrl = new URL('../src/engine.mjs', import.meta.url).href;
   const worker = new Worker(`
     const { parentPort, workerData } = require('node:worker_threads');
@@ -27,13 +28,16 @@ async function runEngine(code, dataDir = 'memory://') {
       }
     })().catch(error => { throw error; });
   `, { eval: true, workerData: { engineUrl, dataDir } });
+  let deadline;
   try {
     return await new Promise((resolve, reject) => {
+      deadline = setTimeout(() => reject(new Error(`Engine worker exceeded ${deadlineMs} ms`)), deadlineMs);
       worker.once('message', ({ result, error }) => error ? reject(new Error(error.stack || error.message)) : resolve(result));
       worker.once('error', reject);
       worker.once('exit', (code) => reject(new Error(`Engine worker exited before a result (${code})`)));
     });
   } finally {
+    clearTimeout(deadline);
     await worker.terminate();
   }
 }
@@ -211,4 +215,65 @@ test('protocol restores session settings after successful and failed SQL changes
   const modes = decode(result.modes.result.rows[0][0]).split(',');
   assert.ok(modes.includes('ANSI_QUOTES'));
   assert.ok(!modes.includes('NO_BACKSLASH_ESCAPES'));
+});
+
+
+test('large transactions advance redo checkpoints and preserve rollback and reopened data', { timeout: 60_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'mariadb-checkpoint-'));
+  const size = 10_000;
+  let originalChecksum = 0n;
+  let updatedChecksum = 0n;
+  for (let id = 1; id <= size; id++) {
+    const body = String(id).padStart(8, '0') + 'x'.repeat(240);
+    originalChecksum += BigInt(crc32(body));
+    updatedChecksum += BigInt(crc32('updated:' + body));
+  }
+  const original = { total: String(size), owners: '0', bytes: String(size * 248), checksum: String(originalChecksum) };
+  const updated = { total: String(size), owners: String(size * 7), bytes: String(size * 256), checksum: String(updatedChecksum) };
+  const summarySql = 'SELECT COUNT(*) AS total, SUM(COALESCE(owner,0)) AS owners, SUM(LENGTH(body)) AS bytes, SUM(CRC32(body)) AS checksum FROM checkpoint_rows';
+  try {
+    const result = await runEngine(`
+      // Let the embedded server's initial pthread messages reach their workers.
+      await new Promise(resolve => setImmediate(resolve));
+      // A small redo file forces checkpoint progress within one bulk statement.
+      engine.query('SET GLOBAL innodb_log_file_size=8388608');
+      engine.query('CREATE TABLE checkpoint_rows (id INT PRIMARY KEY, owner INT NULL, body VARBINARY(512), KEY owner_idx(owner), KEY body_idx(body(24))) ENGINE=InnoDB');
+      for (let begin = 1; begin <= ${size}; begin += 500) {
+        const values = [];
+        for (let id = begin; id < begin + 500; id++) {
+          const body = String(id).padStart(8, '0') + 'x'.repeat(240);
+          values.push("(" + id + ", NULL, '" + body + "')");
+        }
+        engine.query('INSERT INTO checkpoint_rows VALUES ' + values.join(','));
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      const summary = () => engine.query(${JSON.stringify(summarySql)}).rows[0];
+      const checkpoint = () => engine.query("SHOW GLOBAL STATUS LIKE 'Innodb_lsn_last_checkpoint'").rows[0].Value;
+      const initial = summary();
+      const before = checkpoint();
+      const update = "UPDATE checkpoint_rows SET owner=7, body=CONCAT('updated:',body)";
+      engine.query('START TRANSACTION');
+      engine.query(update);
+      const pending = summary();
+      engine.query('ROLLBACK');
+      const rolledBack = summary();
+      engine.query('START TRANSACTION');
+      engine.query(update);
+      engine.query('COMMIT');
+      const committed = summary();
+      engine.query('SET GLOBAL innodb_log_checkpoint_now=ON');
+      const after = checkpoint();
+      await engine.flush();
+      return { initial, pending, rolledBack, committed, before, after };
+    `, directory, 35_000);
+    assert.deepEqual(result.initial, original);
+    assert.deepEqual(result.pending, updated);
+    assert.deepEqual(result.rolledBack, original);
+    assert.deepEqual(result.committed, updated);
+    assert.ok(BigInt(result.after) > BigInt(result.before), 'The redo checkpoint must advance through actual writes');
+    const reopened = await runEngine(`return engine.query(${JSON.stringify(summarySql)}).rows[0];`, directory, 15_000);
+    assert.deepEqual(reopened, updated);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
