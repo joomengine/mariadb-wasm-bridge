@@ -55,7 +55,7 @@ test('public host-call API executes real MariaDB and preserves PHP wire values',
   } finally { await database.close(); }
 });
 
-test('protocol validates version, database, credentials, charset and exclusive leases', timeout, async () => {
+test('protocol validates version, database, credentials, charset and independent sessions', timeout, async () => {
   const database = await createMariaDB();
   try {
     for (const [payload, sqlstate] of [
@@ -72,7 +72,9 @@ test('protocol validates version, database, credentials, charset and exclusive l
     assert.equal(invalid.error.code, 'INVALID_REQUEST');
     assert.equal((await request(database, { op: 'connect', version: 2 })).error.code, 'UNSUPPORTED_PROTOCOL');
     const connection = await connect(database);
-    assert.equal((await request(database, { op: 'connect' })).error.sqlstate, '08004');
+    const another = await connect(database);
+    assert.notEqual(another, connection);
+    await request(database, { op: 'close', connection: another });
     assert.equal((await request(database, { op: 'query', connection: 'wrong', sql: 'SELECT 1' })).error.sqlstate, '08003');
     const missing = await request(database, { op: 'query', connection, sql: 'SELECT * FROM missing_table' });
     assert.equal(missing.error.errno, 1146);
@@ -214,4 +216,28 @@ test('a reset failure retains its connection lease', async () => {
   protocol.connection = 'leased-connection';
   await assert.rejects(protocol.reset(), /storage failure/);
   assert.equal(protocol.connection, 'leased-connection');
+});
+
+test('real sessions isolate transactions, temporary tables, variables and close ownership', timeout, async () => {
+  const database = await createMariaDB();
+  try {
+    const first = await connect(database);
+    const second = await connect(database);
+    await execute(database, first, 'CREATE TABLE session_rows (id INT PRIMARY KEY) ENGINE=InnoDB');
+    await execute(database, first, 'SET @owner=11');
+    await execute(database, first, 'CREATE TEMPORARY TABLE private_rows (id INT)');
+    await execute(database, first, 'START TRANSACTION');
+    await execute(database, first, 'INSERT INTO session_rows VALUES (1)');
+    assert.deepEqual((await execute(database, second, 'SELECT COUNT(*) FROM session_rows')).rows[0].map(decode), ['0']);
+    assert.deepEqual((await execute(database, second, 'SELECT @owner')).rows[0], [null]);
+    assert.equal((await request(database, { op: 'query', connection: second, sql: 'SELECT * FROM private_rows' })).error.errno, 1146);
+    await execute(database, second, 'SET @owner=22');
+    await execute(database, second, 'INSERT INTO session_rows VALUES (2)');
+    await request(database, { op: 'close', connection: first });
+    assert.deepEqual((await execute(database, second, 'SELECT id FROM session_rows')).rows.map(row => decode(row[0])), ['2']);
+    assert.deepEqual((await execute(database, second, 'SELECT @owner')).rows[0].map(decode), ['22']);
+    const reopened = await connect(database);
+    assert.deepEqual((await execute(database, reopened, 'SELECT @owner')).rows[0], [null]);
+    assert.deepEqual((await execute(database, reopened, 'SELECT @@max_allowed_packet, @@innodb_buffer_pool_size')).rows[0].map(decode), ['134217728', '67108864']);
+  } finally { await database.close(); }
 });

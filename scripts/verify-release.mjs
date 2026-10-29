@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hashFile, inventory, releaseDir, root, run } from './release-utils.mjs';
-import { enginePatch } from './prepare-engine.mjs';
+
 
 export async function verifyRelease() {
   const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -63,10 +63,12 @@ export async function verifyRelease() {
     assert.equal(npmPackage.dependencies, undefined, 'The npm runtime uses its prepared bundled engine');
     const patchRecord = JSON.parse(await readFile(path.join(bundle, 'vendor/lite4mariadb/joomengine-patches.json'), 'utf8'));
     assert.deepEqual(patchRecord, manifest.engine.threadingPatch, 'Threading patch provenance mismatch');
-    const { patchedSha256, ...configuration } = patchRecord;
-    assert.deepEqual(configuration, enginePatch, 'Unexpected engine modification');
+    const { patchedSha256 } = patchRecord;
+    assert.equal(patchRecord.id, 'independent-sessions-v1');
+    assert.equal(patchRecord.upstreamSourceCommit, '24be9371a2f6c71250a2356631ad6feab2280b02');
+    assert.equal(patchRecord.patchSha256, (await hashFile(path.join(root, 'patches/engine/independent-sessions.patch'))).sha256);
     assert.equal(manifest.files['vendor/lite4mariadb/lite4mariadb.js'].sha256, patchedSha256);
-    assert.equal(manifest.files['vendor/lite4mariadb/lite4mariadb.wasm'].sha256, enginePatch.wasmSha256, 'The upstream WASM must remain unchanged');
+    assert.equal(manifest.files['vendor/lite4mariadb/lite4mariadb.wasm'].sha256, patchRecord.wasmSha256, 'Built engine binary differs from its provenance');
     const npmFiles = await inventory(path.join(extracted, 'package'));
     delete npmFiles['package.json'];
     const sharedFiles = manifest.files;

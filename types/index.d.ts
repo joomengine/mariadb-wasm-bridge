@@ -13,13 +13,13 @@ export interface MariaDBOptions {
   timeoutMs?: number;
   /** Engine loading and persistence restoration deadline. Default 120000. */
   startupTimeoutMs?: number;
-  /** UTF-8 host-call request limit, default 8 MiB. */
+  /** UTF-8 host-call request limit, default 32 MiB. */
   maxRequestBytes?: number;
-  /** UTF-8 host-call response limit, default 16 MiB. */
+  /** UTF-8 host-call response limit, default 64 MiB. */
   maxResponseBytes?: number;
   /** Accepted active/queued operation limit, default 64. */
   maxQueuedRequests?: number;
-  /** Accepted active/queued request bytes, default 32 MiB. */
+  /** Accepted active/queued request bytes, default 128 MiB. */
   maxQueuedBytes?: number;
   /** Browser IndexedDB store protected by an exclusive Web Lock. */
   persistence?: { key: string };
@@ -35,7 +35,7 @@ export interface MariaDBBridge {
   readonly hostCalls: Readonly<{ 'mariadb.v1': (payloadJSON: string) => Promise<string> }>;
   /** Explicit durability boundary for browser persistence. */
   flush(): Promise<void>;
-  /** Roll back and discard the lease after every completed CGI request or abandoned execution. */
+  /** Roll back and close all sessions after every completed CGI request or abandoned execution. */
   reset(): Promise<void>;
   /** Drain accepted work, roll back, persist, terminate, and release the lock. */
   close(): Promise<void>;

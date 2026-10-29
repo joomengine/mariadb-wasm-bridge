@@ -1,0 +1,111 @@
+diff --git a/wasm/CMakeLists.txt b/wasm/CMakeLists.txt
+index a8dc86d7..06db777f 100644
+--- a/wasm/CMakeLists.txt
++++ b/wasm/CMakeLists.txt
+@@ -54,7 +54,7 @@ SET_TARGET_PROPERTIES(lite4mariadb PROPERTIES
+ )
+ 
+ SET(WASM_EXPORTED_FUNCTIONS
+-  "['_l4m_open','_l4m_query','_l4m_exec_multi','_l4m_escape','_l4m_close','_l4m_free','_malloc','_free']")
++  "['_l4m_session_open','_l4m_session_query','_l4m_session_close','_l4m_open','_l4m_query','_l4m_exec_multi','_l4m_escape','_l4m_close','_l4m_free','_malloc','_free']")
+ SET(WASM_EXPORTED_RUNTIME
+   "['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','FS']")
+ 
+@@ -71,7 +71,7 @@ TARGET_LINK_OPTIONS(lite4mariadb PRIVATE
+   "SHELL:-s MAXIMUM_MEMORY=2147483648"
+   "SHELL:-s STACK_SIZE=2097152"
+   "SHELL:-s PTHREAD_POOL_SIZE=16"
+-  "SHELL:-s PTHREAD_POOL_SIZE_STRICT=0"
++  "SHELL:-s PTHREAD_POOL_SIZE_STRICT=2"
+   "SHELL:-s NO_EXIT_RUNTIME=1"
+   "SHELL:-s INVOKE_RUN=0"
+   "SHELL:-s EXIT_RUNTIME=0"
+diff --git a/wasm/lite4mariadb.c b/wasm/lite4mariadb.c
+index 89e90822..5bb9186d 100644
+--- a/wasm/lite4mariadb.c
++++ b/wasm/lite4mariadb.c
+@@ -17,6 +17,8 @@
+ #endif
+ 
+ static MYSQL *g_mysql;
++#define L4M_SESSION_LIMIT 32
++static MYSQL *g_sessions[L4M_SESSION_LIMIT];
+ static int g_open;
+ 
+ static void ensure_dir(const char *path)
+@@ -332,10 +334,11 @@ int l4m_open(void)
+     (char *)"--skip-networking",
+     (char *)"--skip-log-bin",
+     (char *)"--innodb-use-native-aio=0",
+-    (char *)"--innodb-buffer-pool-size=16M",
+-    (char *)"--loose-innodb-buffer-pool-size-max=16M",
++    (char *)"--innodb-buffer-pool-size=64M",
++    (char *)"--loose-innodb-buffer-pool-size-max=256M",
+     (char *)"--innodb-log-buffer-size=2M",
+-    (char *)"--max-connections=10",
++    (char *)"--max-connections=33",
++    (char *)"--max-allowed-packet=128M",
+     (char *)"--default-storage-engine=InnoDB",
+     (char *)"--loose-innodb-read-io-threads=1",
+     (char *)"--loose-innodb-write-io-threads=1",
+@@ -377,6 +380,11 @@ int l4m_open(void)
+ EMSCRIPTEN_KEEPALIVE
+ void l4m_close(void)
+ {
++  for (unsigned i= 0; i < L4M_SESSION_LIMIT; i++)
++  {
++    if (g_sessions[i]) mysql_close(g_sessions[i]);
++    g_sessions[i]= NULL;
++  }
+   if (g_mysql)
+   {
+     mysql_close(g_mysql);
+@@ -449,6 +457,48 @@ char *l4m_query(const char *sql)
+   return dup_str("{\"ok\":false,\"error\":\"oom\"}");
+ }
+ 
++/* Each PHP PDO owns a real embedded MariaDB connection. All queries execute
++   synchronously on this worker, so selecting the handle cannot interleave. */
++EMSCRIPTEN_KEEPALIVE
++int l4m_session_open(void)
++{
++  if (!g_open) return 0;
++  unsigned slot;
++  for (slot= 0; slot < L4M_SESSION_LIMIT && g_sessions[slot]; slot++) {}
++  if (slot == L4M_SESSION_LIMIT) return 0;
++  MYSQL *connection= mysql_init(NULL);
++  if (!connection) return 0;
++  if (!mysql_real_connect(connection, NULL, "root", "", NULL, 0, NULL,
++                          CLIENT_MULTI_STATEMENTS))
++  {
++    mysql_close(connection);
++    return 0;
++  }
++  g_sessions[slot]= connection;
++  return (int)slot + 1;
++}
++
++EMSCRIPTEN_KEEPALIVE
++char *l4m_session_query(int session, const char *sql)
++{
++  if (session < 1 || session > L4M_SESSION_LIMIT || !g_sessions[session - 1])
++    return json_err_state(2006, "Session is closed", "08003");
++  MYSQL *previous= g_mysql;
++  g_mysql= g_sessions[session - 1];
++  char *result= l4m_query(sql);
++  g_mysql= previous;
++  return result;
++}
++
++EMSCRIPTEN_KEEPALIVE
++void l4m_session_close(int session)
++{
++  if (session < 1 || session > L4M_SESSION_LIMIT || !g_sessions[session - 1])
++    return;
++  mysql_close(g_sessions[session - 1]);
++  g_sessions[session - 1]= NULL;
++}
++
+ #ifdef __wasi__
+ /*
+   WASIX CLI entry point: opens the embedded server, runs each argument as

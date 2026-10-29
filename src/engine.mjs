@@ -23,7 +23,7 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
     if (closed) throw engineError('The MariaDB engine is closed', 'HY000', 2006);
   }
 
-  function query(sql, stringMode) {
+  function query(sql, stringMode, session = 0) {
     requireOpen();
     if (typeof sql !== 'string' || !sql.trim()) throw new TypeError('SQL must be a non-empty string');
     // The upstream C ABI accepts NUL-terminated strings, not a byte length.
@@ -41,7 +41,7 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
     let pointer;
     try {
       module.stringToUTF8(sql, input, size);
-      pointer = module._l4m_query(input);
+      pointer = session === 0 ? module._l4m_query(input) : module._l4m_session_query(session, input);
     } finally { module._free(input); }
     if (!pointer) throw engineError('MariaDB returned an empty result pointer', 'HY000');
     let json;
@@ -67,6 +67,13 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
 
   return {
     query,
+    openSession() {
+      requireOpen();
+      const session = database.mod._l4m_session_open();
+      if (!Number.isInteger(session) || session < 1) throw engineError('Cannot open another MariaDB session (maximum 32)', '08004', 1040, 'CONNECTION_LIMIT');
+      return session;
+    },
+    closeSession(session) { requireOpen(); database.mod._l4m_session_close(session); },
     async flush() { requireOpen(); await database.persist(); },
     async close() {
       if (closed) return;
