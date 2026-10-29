@@ -84,7 +84,7 @@ $value = $statement->fetchColumn();
 The local endpoint aliases `localhost` and `127.0.0.1` are also accepted for
 Joomla configuration. These identify the embedded engine; they never open a
 network connection. The DSN accepts `utf8mb4` (the default), `utf8mb3`, and its `utf8` alias. The latter two negotiate actual three-byte UTF-8 with MariaDB; they do not enable supplementary Unicode characters. Custom network ports, Unix sockets and other charsets are
-rejected. The host enforces its supported user/password and connection lease.
+rejected. The host enforces its supported user/password and independent connection.
 
 ## Supported behavior and boundaries
 
@@ -120,7 +120,7 @@ rejected. The host enforces its supported user/password and connection lease.
 - Persistent PDO handles, scrollable cursors, native prepares and unimplemented
   driver attributes fail explicitly. Browser database persistence belongs to
   the bridge, not `PDO::ATTR_PERSISTENT`.
-- Destruction releases the connection lease. The host must roll back unfinished
+- Destruction releases the independent connection. The host must roll back unfinished
   work when closing. Killing PHP's worker can bypass PHP destruction: the
   embedding application must close or reset the database bridge on runtime
   failure before provisioning another PHP runtime.

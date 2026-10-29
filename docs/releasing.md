@@ -87,13 +87,28 @@ latest-release URLs at runtime.
 
 ## Prepared engine provenance
 
-The upstream `lite4mariadb` npm package is a build dependency. Engine preparation
-checks its fixed JavaScript and WASM SHA-256 values, applies the documented browser
-pthread exhaustion guard, and copies the unchanged binary and GPL notice into
-`vendor/lite4mariadb`. Both npm and standalone archives contain exactly this
-prepared engine; consumers do not run a postinstall hook. `engine.threadingPatch`
-in the release manifest records the original and transformed glue hashes,
-unchanged binary hash, upstream commit, and strict browser pool settings.
-Changing the pinned upstream version requires reviewing and updating the transform,
-then passing allocator-boundary, repeated browser-shutdown, SQL, persistence, and
-release-parity tests. Do not silently copy an unreviewed engine into a release.
+The engine job rebuilds lite4mariadb from immutable source using the reviewed
+independent-session patch and pinned Emscripten 6.0.6. Its verified output is
+cached by source/patch/compiler configuration, then used by native, browser and
+release validation. `engine.threadingPatch` records the source commit, patch
+hash, compiler identity, generated JavaScript and WASM hashes, and strict worker
+pool settings. The archive includes the complete patch, build recipe and source
+link with the GPL notices. Consumers use the already built release assets.
+Changing an input requires passing session/transaction isolation, retained PDO,
+repeated browser shutdown, SQL, persistence and release-parity tests.
+
+## Publication from validated main
+
+A merged stable package-version bump publishes automatically after both main CI
+validation jobs succeed. The publication job consumes the exact tested release
+artifact, checks its source commit, creates the new version tag without force,
+and uses the existing draft-upload/verification publisher. A version that is
+already published is skipped. Conflicting tags or unfinished releases fail
+explicitly and require the existing tag-release workflow to be completed; they
+are never moved or overwritten. Main runs are not cancelled midway through
+publication, while superseded pull-request checks still cancel normally.
+
+Tags created with the workflow token intentionally do not start another build.
+Manual tag publication and recovery remain available by running the Release
+workflow against the existing version tag. Running it against main fails the
+tag identity check before publication.

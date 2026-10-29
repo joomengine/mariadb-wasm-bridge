@@ -41,8 +41,10 @@ application and validates Joomla workflows.
 The package supports Node.js 24+, while development and CI use Node.js 26.12.1
 from [.node-version](.node-version) to avoid the known
 [Node.js 24.x shared-WASM lifecycle crash](https://github.com/nodejs/node/issues/66366).
-Clone this repository, run `npm ci`, then
-`npm run prepare:engine`. Tests and release packaging run preparation automatically.
+Clone this repository and run `npm ci`. Build the pinned engine with
+`node scripts/build-engine.mjs` using Emscripten 6.0.6, CMake, Bison and native
+MariaDB build prerequisites. Then run `npm run prepare:engine`. CI caches the
+source-matched engine; tests and packaging verify its provenance before staging.
 The entry point is `src/index.mjs`; npm packages and standalone release archives
 include the prepared engine under `vendor/lite4mariadb`, with no consumer build or
 postinstall step.
@@ -103,8 +105,10 @@ Related JS/WASM assets must satisfy worker origin/CORS policies.
 
 ## Compatibility boundaries
 
-- One engine has one native connection. A second simultaneous PDO handle fails;
-  create another bridge for an independent site.
+- Each PDO owns a separate embedded MariaDB connection (up to 32). Transactions,
+  temporary tables and session variables are independent. Closing or resetting
+  connections rolls back unfinished work and discards their session state.
+  A bridge belongs to one trusted application instance, never multiple tenants.
 - PDO emulated prepares are supported. Native server-side prepares, `mysqli`,
   networking and password authentication are not implemented. The embedded engine
   accepts root or an empty username with an empty password.
@@ -122,9 +126,6 @@ Related JS/WASM assets must satisfy worker origin/CORS policies.
 - `lastInsertId()` uses session `LAST_INSERT_ID()`, retained until another insert
   or reset. It is not a per-statement native getter. Internal metadata queries
   also change diagnostic SQL state such as `ROW_COUNT()` and warnings.
-- Close/reset rolls back transactions and restores autocommit. It is not a full
-  MySQL session reset: temporary tables and session variables can outlive a lease.
-  A bridge belongs to one trusted application instance, never multiple tenants.
 - Results are buffered. Transport/queue limits do not bound MariaDB execution
   memory. The engine has substantial memory and a pthread pool per open instance.
 - Timeout terminates the worker. A query may already have executed; never retry
@@ -136,6 +137,7 @@ See [docs/protocol.md](docs/protocol.md) for the wire format and error behavior.
 
 ```bash
 npm ci --ignore-scripts
+node scripts/build-engine.mjs
 npm run test:integration
 npx playwright install --with-deps chromium firefox
 BRIDGE_BROWSERS=chromium,firefox npm run test:browser
@@ -160,19 +162,27 @@ Bridge source is Apache-2.0. The separately maintained MariaDB WASM dependency i
 GPL-2.0-only and retains its license. Bundling does not relicense upstream code.
 Release archives preserve notices and source provenance; see [NOTICE](NOTICE).
 
-## Browser pthread limit
+## Engine sessions, capacity and scheduling
 
-The bundled JavaScript uses Emscripten’s `PTHREAD_POOL_SIZE_STRICT=2` behavior:
-browsers use the 16 preloaded pthread workers and return `EAGAIN` if the pool is
-exhausted. MariaDB’s task pool handles that allocation failure using its existing
-workers. This prevents synchronous shutdown from waiting for a new browser worker
-that cannot initialize until the blocked creator returns to its event loop. Node
-keeps upstream dynamic worker creation. No database binary is changed.
+The bundled engine is rebuilt from the immutable lite4mariadb 0.1.2 source with
+[the reviewed session patch](patches/engine/independent-sessions.patch). Its new
+C entry points open, query and close independent embedded MariaDB connections.
+The public host-call protocol and native PHP PDO module remain unchanged.
 
-`npm run prepare:engine` verifies the exact upstream glue and WASM hashes before
-applying the reviewed JavaScript change. The package includes patch notices and
-hashes, also recorded in `bridge-manifest.json`. See [patches/NOTICE](patches/NOTICE).
-A custom `engineModuleUrl` must provide an engine with equivalent browser pthread
-exhaustion behavior; the unmodified lite4mariadb 0.1.2 browser module can deadlock
-during shutdown. Native thread-allocation errors remain possible for workloads
-that require more than the browser pool can provide.
+The InnoDB buffer pool starts at 64 MiB and may be resized up to 256 MiB; the
+server packet limit is 128 MiB. Default JSON transport limits are 32 MiB per
+request, 64 MiB per response and 128 MiB across accepted queued requests.
+These are separate budgets, not a total database-size cap or a promise that a
+128 MiB row fits in a single PHP query. Results are buffered and base64 encoded,
+so large values should use bounded batches or chunks. The WASM heap can grow to
+2 GiB, including engine structures and data pages; browser storage quota and
+PHP's separate memory budget also apply.
+
+The engine uses 16 preloaded pthread workers and returns `EAGAIN` on exhaustion.
+Browser logical CPU scheduling remains capped at four to reserve capacity for
+background services. Row and metadata lock waits default to five seconds so a
+second synchronous session reports a normal SQL timeout before the bridge
+operation deadline. Build provenance records the upstream source, patch hash,
+compiler identity and both generated asset hashes. `npm run prepare:engine`
+verifies that record before staging, and release archives include the patch,
+reproduction script and GPL notices. See [patches/NOTICE](patches/NOTICE).

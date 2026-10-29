@@ -189,3 +189,26 @@ test('binary types omitted by the upstream serializer require explicit SQL casts
   assert.deepEqual(result.errors, ['UNSUPPORTED_RESULT', 'UNSUPPORTED_RESULT']);
   assert.deepEqual(result.rows, [{ bits: '128' }]);
 });
+
+test('protocol restores session settings after successful and failed SQL changes', { timeout: 60_000 }, async () => {
+  const result = await runEngine(`
+    const { MariaDBProtocol } = await import(${JSON.stringify(new URL('../src/protocol.mjs', import.meta.url).href)});
+    const protocol = new MariaDBProtocol(engine, 'test', 'test');
+    const invoke = async payload => JSON.parse(await protocol.handle(JSON.stringify({version:1,...payload})));
+    const connection = (await invoke({op:'connect'})).result.connection;
+    const selected = await invoke({op:'query', connection, sql:'SELECT 42'});
+    const failed = await invoke({op:'query', connection, sql:"SET SESSION character_set_client='latin1', SESSION character_set_results='unknown_charset'"});
+    const recovered = await invoke({op:'query', connection, sql:'SELECT @@character_set_client, @@character_set_results'});
+    await invoke({op:'query', connection, sql:"SET SESSION sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'"});
+    const modes = await invoke({op:'query', connection, sql:'SELECT @@SESSION.sql_mode'});
+    await protocol.reset();
+    return {selected, failed, recovered, modes};
+  `);
+  assert.equal(result.selected.ok, true);
+  assert.equal(result.failed.ok, false);
+  const decode = value => Buffer.from(value, 'base64').toString('utf8');
+  assert.deepEqual(result.recovered.result.rows[0].map(decode), ['utf8mb4', 'utf8mb4']);
+  const modes = decode(result.modes.result.rows[0][0]).split(',');
+  assert.ok(modes.includes('ANSI_QUOTES'));
+  assert.ok(!modes.includes('NO_BACKSLASH_ESCAPES'));
+});

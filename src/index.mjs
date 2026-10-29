@@ -24,10 +24,10 @@ function validateOptions(input) {
     database: input.database ?? 'joomla',
     timeoutMs: positiveInteger(input.timeoutMs, 'timeoutMs', 30_000),
     startupTimeoutMs: positiveInteger(input.startupTimeoutMs, 'startupTimeoutMs', 120_000),
-    maxRequestBytes: positiveInteger(input.maxRequestBytes, 'maxRequestBytes', 8 * 1024 * 1024),
-    maxResponseBytes: positiveInteger(input.maxResponseBytes, 'maxResponseBytes', 16 * 1024 * 1024),
+    maxRequestBytes: positiveInteger(input.maxRequestBytes, 'maxRequestBytes', 32 * 1024 * 1024),
+    maxResponseBytes: positiveInteger(input.maxResponseBytes, 'maxResponseBytes', 64 * 1024 * 1024),
     maxQueuedRequests: positiveInteger(input.maxQueuedRequests, 'maxQueuedRequests', 64, 1024),
-    maxQueuedBytes: positiveInteger(input.maxQueuedBytes, 'maxQueuedBytes', 32 * 1024 * 1024),
+    maxQueuedBytes: positiveInteger(input.maxQueuedBytes, 'maxQueuedBytes', 128 * 1024 * 1024),
   };
   identifier(options.database);
   for (const name of ['engineModuleUrl', 'wasmUrl']) {
