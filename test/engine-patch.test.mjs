@@ -21,13 +21,18 @@ test('prepared engine records immutable source, patch, compiler and artifact has
   assert.equal(sha256(patch), provenance.patchSha256);
 });
 
-test('browser engine retains bounded native workers and CPU scheduling', () => {
+test('engine records bounded browser workers and shared CPU scheduling', () => {
   assert.equal(provenance.browserPthreadPoolSizeStrict, 2);
+  assert.equal(provenance.browserLogicalCpuBudget, 4);
+  assert.equal(provenance.nodeLogicalCpuBudget, 4);
   const expression = prepared.match(/var _emscripten_num_logical_cores=\(\)=>(.*?);/)?.[1];
   assert.ok(expression);
   const cores = new Function('ENVIRONMENT_IS_NODE', 'navigator', 'require', `return ${expression};`);
   for (const [hardwareConcurrency, expected] of [[1, 1], [2, 2], [8, 4], [128, 4], [undefined, 1]]) {
     assert.equal(cores(false, { hardwareConcurrency }, () => { throw new Error('Unexpected Node branch'); }), expected);
+  }
+  for (const [count, expected] of [[0, 1], [1, 1], [2, 2], [9, 4], [128, 4]]) {
+    assert.equal(cores(true, {}, () => ({ cpus: () => Array(count) })), expected);
   }
   assert.match(prepared, /PThread\.unusedWorkers\.length/);
 });
