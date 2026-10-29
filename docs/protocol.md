@@ -63,7 +63,7 @@ tables and session variables, for example after terminating PHP. If the DB
 worker itself times out, it is terminal and must be replaced; `close()` then
 releases resources without claiming that unflushed data was saved.
 
-Queries restore supported connection settings and issue a metadata query. Thus
+Queries restore supported connection settings when changed and issue a metadata query. Thus
 SQL diagnostic functions such as `ROW_COUNT()`, `FOUND_ROWS()` and warnings may
 reflect bridge statements. Use returned affected-row metadata. Protocol version
 and native driver version must be recorded with PHP build assets and tested as a

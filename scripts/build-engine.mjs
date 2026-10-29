@@ -25,13 +25,14 @@ if (!process.env.ENGINE_SOURCE_DIR) {
   }
 }
 assert.equal(run('git', ['-C', source, 'rev-parse', 'HEAD'], { stdio: 'pipe' }), commit);
-run('git', ['-C', source, 'submodule', 'update', '--init', '--depth', '1', 'libmariadb']);
+run('git', ['-C', source, 'submodule', 'update', '--init', '--depth', '1', 'libmariadb', 'extra/wolfssl/wolfssl']);
 const patch = path.join(root, 'patches/engine/independent-sessions.patch');
 const alreadyApplied = spawnSync('git', ['-C', source, 'apply', '--reverse', '--check', patch], { stdio: 'ignore' }).status === 0;
 if (!alreadyApplied) {
   run('git', ['-C', source, 'apply', '--check', patch]);
   run('git', ['-C', source, 'apply', patch]);
 }
+assert.equal(run('git', ['-C', source, 'diff', '--', 'wasm/lite4mariadb.c', 'wasm/CMakeLists.txt'], { stdio: 'pipe' }), (await readFile(patch, 'utf8')).trim(), 'Source modifications differ from the reviewed patch');
 run('bash', ['wasm/build.sh'], { cwd: source, env: {
   ...process.env, JOBS: process.env.JOBS ?? '4',
   NATIVE_BUILD: path.join(buildRoot, 'native'), WASM_BUILD: path.join(buildRoot, 'wasm'),

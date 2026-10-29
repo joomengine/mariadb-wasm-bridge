@@ -80,8 +80,8 @@ $result = $db->query('SELECT VERSION() AS server_version')->fetch(PDO::FETCH_ASS
 Use Joomla's PDO MySQL (`mysql`) database path. The embedded engine does not
 implement `mysqli`, remote networking or password authentication. Joomla should
 use its supported filesystem session handler with a private persisted session
-path. Its database session handler may temporarily retain a second PDO handle
-during session-ID rotation; the bridge supports one native connection.
+path. Each PDO handle now owns an independent embedded server session, including
+handles retained during session-ID rotation.
 
 ## Request boundary cleanup
 
@@ -103,9 +103,9 @@ async function handleRequest(php, database, request) {
 ```
 
 Wait for `reset()` before accepting another request. It rolls back unfinished
-transactions, restores autocommit and discards the connection lease; committed
-application data remains. If cleanup fails, stop the session. A reset is not a
-full MySQL session reset: one bridge belongs to one trusted application instance.
+transactions and closes all server sessions, discarding temporary tables and
+session variables while retaining committed data. If cleanup fails, stop the
+session. One bridge belongs to one trusted application instance.
 
 A hard PHP timeout requires terminating the PHP worker before resetting or
 closing its database. Never reset while PHP is still running. A database timeout
@@ -117,7 +117,7 @@ that session before continuing with the replacement runtime.
 ## Persistence and static hosting
 
 Keep PHP files and MariaDB data in separate browser stores. Finish the request
-and reset its database lease before flushing the stores. These checkpoints are
+and close its database sessions before flushing the stores. These checkpoints are
 not an atomic transaction across both stores. Record completed installation or
 recipe steps only after their required data and files are saved.
 
