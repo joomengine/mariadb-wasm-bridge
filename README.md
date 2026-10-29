@@ -178,9 +178,16 @@ so large values should use bounded batches or chunks. The WASM heap can grow to
 2 GiB, including engine structures and data pages; browser storage quota and
 PHP's separate memory budget also apply.
 
-The engine uses 16 preloaded pthread workers and returns `EAGAIN` on exhaustion.
-Browser logical CPU scheduling remains capped at four to reserve capacity for
-background services. Row and metadata lock waits default to five seconds so a
+When InnoDB waits for a redo checkpoint, the WebAssembly build yields before
+retrying. This lets background checkpoint writes acquire the shared latch and
+complete proxied filesystem operations. MariaDB retains its transaction and
+durability semantics.
+
+The engine preloads 16 pthread workers; browsers return `EAGAIN` when this pool
+is exhausted. Logical CPU scheduling is capped at four in both browsers and
+Node to keep MariaDB background concurrency bounded. Node may still allocate
+additional workers under Emscripten scheduling rules. Row and metadata lock
+waits default to five seconds so a
 second synchronous session reports a normal SQL timeout before the bridge
 operation deadline. Build provenance records the upstream source, patch hash,
 compiler identity and both generated asset hashes. `npm run prepare:engine`

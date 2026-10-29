@@ -32,7 +32,7 @@ if (!alreadyApplied) {
   run('git', ['-C', source, 'apply', '--check', patch]);
   run('git', ['-C', source, 'apply', patch]);
 }
-assert.equal(run('git', ['-C', source, 'diff', '--full-index', '--', 'wasm/lite4mariadb.c', 'wasm/CMakeLists.txt', 'mysys/get_password.c'], { stdio: 'pipe' }), (await readFile(patch, 'utf8')).trim(), 'Source modifications differ from the reviewed patch');
+assert.equal(run('git', ['-C', source, 'diff', '--full-index', '--', 'wasm/lite4mariadb.c', 'wasm/CMakeLists.txt', 'mysys/get_password.c', 'storage/innobase/log/log0log.cc', 'storage/innobase/buf/buf0flu.cc'], { stdio: 'pipe' }), (await readFile(patch, 'utf8')).trim(), 'Source modifications differ from the reviewed patch');
 run('bash', ['wasm/build.sh'], { cwd: source, env: {
   ...process.env, JOBS: process.env.JOBS ?? '4',
   NATIVE_BUILD: path.join(buildRoot, 'native'), WASM_BUILD: path.join(buildRoot, 'wasm'),
@@ -44,14 +44,14 @@ const gluePath = path.join(dist, 'lite4mariadb.js');
 let glue = await readFile(gluePath, 'utf8');
 const cores = 'var _emscripten_num_logical_cores=()=>ENVIRONMENT_IS_NODE?require("node:os").cpus().length:navigator["hardwareConcurrency"];';
 assert.equal(glue.split(cores).length, 2, 'Review the engine CPU scheduling adapter after a toolchain update');
-glue = glue.replace(cores, 'var _emscripten_num_logical_cores=()=>ENVIRONMENT_IS_NODE?require("node:os").cpus().length:Math.max(1,Math.min(4,navigator["hardwareConcurrency"]||1));');
+glue = glue.replace(cores, 'var _emscripten_num_logical_cores=()=>Math.max(1,Math.min(4,ENVIRONMENT_IS_NODE?require("node:os").cpus().length:navigator["hardwareConcurrency"]||1));');
 await writeFile(gluePath, glue);
 const compiler = run('emcc', ['--version'], { stdio: 'pipe' }).split('\n')[0];
 assert.match(compiler, /6\.0\.6/);
 const provenance = {
   id: 'independent-sessions-v1', upstreamVersion: '0.1.2', upstreamSourceCommit: commit,
   patchSha256: hash(await readFile(patch)), compiler,
-  browserPthreadPoolSize: 16, browserPthreadPoolSizeStrict: 2, browserLogicalCpuBudget: 4,
+  browserPthreadPoolSize: 16, browserPthreadPoolSizeStrict: 2, browserLogicalCpuBudget: 4, nodeLogicalCpuBudget: 4,
   patchedSha256: hash(glue), wasmSha256: hash(await readFile(path.join(dist, 'lite4mariadb.wasm'))),
 };
 await writeFile(path.join(dist, 'joomengine-patches.json'), `${JSON.stringify(provenance, null, 2)}\n`);

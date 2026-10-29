@@ -10,6 +10,59 @@ index bf4749121115c4ad2ef584c7d2b203c3f1cee454..37d0d80d601516088dca66085e3052eb
  #include <my_sys.h>
  #include "mysql.h"
  #include <m_string.h>
+diff --git a/storage/innobase/buf/buf0flu.cc b/storage/innobase/buf/buf0flu.cc
+index be4b0e473b26bb22b0e46e0fc229492d90841314..0ecc7db18fede2eeb14a856eb4814833172ca610 100644
+--- a/storage/innobase/buf/buf0flu.cc
++++ b/storage/innobase/buf/buf0flu.cc
+@@ -26,6 +26,9 @@ Created 11/11/1995 Heikki Tuuri
+ *******************************************************/
+ 
+ #include "univ.i"
++#ifdef __EMSCRIPTEN__
++#include <emscripten/threading.h>
++#endif
+ #include <my_service_manager.h>
+ #include <mysql/service_thd_wait.h>
+ #include <sql_class.h>
+@@ -2353,6 +2356,11 @@ ATTRIBUTE_COLD void buf_flush_wait(lsn_t lsn, bool checkpoint) noexcept
+       log_sys.latch.wr_unlock();
+     mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+     os_aio_wait_until_no_pending_writes(false);
++#ifdef __EMSCRIPTEN__
++    /* With no pending I/O, the wait above may return immediately while the
++       page cleaner still needs these latches. Let it finish before retrying. */
++    emscripten_thread_sleep(1);
++#endif
+ 
+     log_sys.latch.wr_lock();
+     mysql_mutex_lock(&buf_pool.flush_list_mutex);
+diff --git a/storage/innobase/log/log0log.cc b/storage/innobase/log/log0log.cc
+index 6fccb62c0e9f969c095637eddd4f8fbf841d938c..2e50bebe3ac887414f55fe0d37ce3148480d8f82 100644
+--- a/storage/innobase/log/log0log.cc
++++ b/storage/innobase/log/log0log.cc
+@@ -25,6 +25,9 @@ Created 12/9/1995 Heikki Tuuri
+ *******************************************************/
+ 
+ #include "univ.i"
++#ifdef __EMSCRIPTEN__
++#include <emscripten/threading.h>
++#endif
+ #include <debug_sync.h>
+ #include <my_service_manager.h>
+ 
+@@ -2018,6 +2021,12 @@ ATTRIBUTE_COLD void log_t::checkpoint_margin() noexcept
+ 
+   while (check_for_checkpoint())
+   {
++#ifdef __EMSCRIPTEN__
++    /* A completed page flush can leave the checkpoint writer waiting for
++       this latch. Yield without holding either latch, and service proxied
++       filesystem calls, before retrying the checkpoint in the Wasm runtime. */
++    emscripten_thread_sleep(1);
++#endif
+     latch.wr_lock();
+     ut_ad(!recv_no_log_write);
+ 
 diff --git a/wasm/CMakeLists.txt b/wasm/CMakeLists.txt
 index a8dc86d7f90747f124716cd50550db962b546cc1..06db777f4b857c59b485cd38b25633fd44fce455 100644
 --- a/wasm/CMakeLists.txt
