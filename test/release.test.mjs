@@ -1,3 +1,4 @@
+import { mainReleaseDecision } from '../scripts/main-release-decision.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -79,4 +80,16 @@ test('release preparation repairs manual bumps and rejects downgrades and existi
     assert.equal(identity.version, '0.1.5');
     assert.equal(identity.lock.packages.dependency.version, '1.0.0');
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test('validated main only creates new stable tags and never replaces an existing release', () => {
+  const tag = 'v0.1.6';
+  assert.equal(mainReleaseDecision(tag, null, null), 'create');
+  assert.equal(mainReleaseDecision(tag, {tag_name:tag, draft:false, prerelease:false}, {object:{sha:'old-commit'}}), 'published');
+  assert.throws(() => mainReleaseDecision(tag, null, {object:{sha:'different-commit'}}), /unpublished/);
+  assert.throws(() => mainReleaseDecision(tag, null, {object:{sha:'same-commit'}}), /unpublished/);
+  assert.throws(() => mainReleaseDecision(tag, {tag_name:tag, draft:true}, null), /unpublished/);
+  assert.throws(() => mainReleaseDecision(tag, {tag_name:tag, draft:false, prerelease:true}, null), /stable version/);
+  assert.throws(() => mainReleaseDecision(tag, {tag_name:'v0.1.5', draft:false}, null), /stable version/);
 });
