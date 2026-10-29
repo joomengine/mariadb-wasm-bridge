@@ -121,6 +121,12 @@ and close its database sessions before flushing the stores. These checkpoints ar
 not an atomic transaction across both stores. Record completed installation or
 recipe steps only after their required data and files are saved.
 
+The bridge's `flush()` waits for an InnoDB checkpoint before synchronizing IDBFS.
+Keep application requests paused until that promise resolves; propagate rejection
+without advancing saved-state metadata. An IndexedDB copy alone does not flush
+dirty database buffer-pool pages. A successful live save must survive page reload
+or worker termination without requiring a later graceful `close()`.
+
 MariaDB uses threads and requires cross-origin isolation. A static deployment
 must supply the required headers or a tested isolation service worker. PHP request
 routing and isolation must coexist under the same service-worker scope on GitHub

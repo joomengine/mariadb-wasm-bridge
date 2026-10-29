@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -10,7 +10,7 @@ import { createEngine } from '../src/engine.mjs';
 
 // Each engine belongs to a worker: the upstream server retains pthread workers
 // after shutdown, and separate workers also isolate its global connection.
-async function runEngine(code, dataDir = 'memory://', deadlineMs = 60_000) {
+async function runEngine(code, dataDir = 'memory://', deadlineMs = 60_000, close = true) {
   const engineUrl = new URL('../src/engine.mjs', import.meta.url).href;
   const worker = new Worker(`
     const { parentPort, workerData } = require('node:worker_threads');
@@ -20,14 +20,14 @@ async function runEngine(code, dataDir = 'memory://', deadlineMs = 60_000) {
       try {
         engine = await createEngine({ dataDir: workerData.dataDir });
         const result = await (async () => { ${code} })();
-        await engine.close();
+        if (workerData.close) await engine.close();
         parentPort.postMessage({ result });
       } catch (error) {
         try { await engine?.close(); } catch {}
         parentPort.postMessage({ error: { message: error.message, stack: error.stack } });
       }
     })().catch(error => { throw error; });
-  `, { eval: true, workerData: { engineUrl, dataDir } });
+  `, { eval: true, workerData: { engineUrl, dataDir, close } });
   let deadline;
   try {
     return await new Promise((resolve, reject) => {
@@ -121,6 +121,68 @@ test('heap SQL transport releases allocated input on encoding and native failure
   }
 });
 
+test('flush checkpoints before persistence and propagates either failure', async () => {
+  for (const failure of ['none', 'checkpoint', 'persistence']) {
+    const engineModuleUrl = 'data:text/javascript,' + encodeURIComponent(`
+      export const calls = [];
+      const mod = {
+        lengthBytesUTF8: value => value.length, _malloc: () => 1024, _free: () => {}, _l4m_free: () => {},
+        stringToUTF8: sql => calls.push(sql),
+        _l4m_query: () => { ${failure === 'checkpoint' ? 'throw new Error("Checkpoint failed");' : 'return 2048;'} },
+        UTF8ToString: () => JSON.stringify({ok:true, rows:[]}),
+      };
+      export const Lite4MariaDB = {create: async () => ({mod,
+        persist: async () => {calls.push('persist'); ${failure === 'persistence' ? 'throw new Error("IndexedDB sync failed");' : ''}},
+        close: async () => {},
+      })};
+    `);
+    const { calls } = await import(engineModuleUrl);
+    const engine = await createEngine({ engineModuleUrl });
+    try {
+      if (failure === 'none') await engine.flush();
+      else await assert.rejects(engine.flush(), failure === 'checkpoint' ? /Checkpoint failed/ : /IndexedDB sync failed/);
+      assert.deepEqual(calls, failure === 'checkpoint'
+        ? ['SET GLOBAL innodb_log_checkpoint_now=ON']
+        : ['SET GLOBAL innodb_log_checkpoint_now=ON', 'persist']);
+    } finally { await engine.close(); }
+  }
+});
+
+test('startup failure retains bounded native diagnostics and its original cause', async (t) => {
+  const reported = [];
+  t.mock.method(console, 'error', (...args) => reported.push(args.join(' ')));
+  const engineModuleUrl = 'data:text/javascript,' + encodeURIComponent(`
+    export const failure = Object.assign(new Error('lite4mariadb: l4m_open failed (1)'), {code:'OPEN_FAILED', errno:2000, sqlstate:'HY000'});
+    export const Lite4MariaDB = {create: async options => {
+      for (let i=0;i<50;i++) options.printErr('Old initialization output ' + i + 'x'.repeat(1000));
+      options.printErr('InnoDB: Plugin initialization aborted with error Data structure corruption');
+      throw failure;
+    }};
+  `);
+  const { failure } = await import(engineModuleUrl);
+  await assert.rejects(createEngine({ engineModuleUrl }), error => {
+    assert.equal(error.cause, failure);
+    assert.equal(error.code, 'OPEN_FAILED');
+    assert.equal(error.errno, 2000);
+    assert.equal(error.sqlstate, 'HY000');
+    assert.match(error.message, /^lite4mariadb: l4m_open failed \(1\)/);
+    assert.match(error.message, /InnoDB: Plugin initialization aborted with error Data structure corruption/);
+    assert.doesNotMatch(error.message, /Old initialization output 0x/);
+    assert.ok(error.message.length < 8300, 'A startup error must not carry an unbounded native log.');
+    return true;
+  });
+  assert.equal(reported.length, 51, 'Capture must retain the usual native stderr output.');
+});
+
+test('startup failure without native output preserves the original error', async () => {
+  const engineModuleUrl = 'data:text/javascript,' + encodeURIComponent(`
+    export const failure = new Error('Asset loading failed');
+    export const Lite4MariaDB = {create: async () => {throw failure;}};
+  `);
+  const { failure } = await import(engineModuleUrl);
+  await assert.rejects(createEngine({ engineModuleUrl }), error => error === failure);
+});
+
 test('embedded NUL and use after close fail explicitly', { timeout: 60_000 }, async () => {
   const errors = await runEngine(`
     const errors = [];
@@ -178,6 +240,49 @@ test('real MariaDB files reopen with committed data', { timeout: 60_000 }, async
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('a completed flush survives worker termination without native shutdown', { timeout: 120_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'mariadb-live-save-'));
+  try {
+    // Deliberately terminate each worker without close(): shutdown would flush
+    // dirty InnoDB pages and conceal an incomplete live-save implementation.
+    await runEngine(`
+      engine.query('CREATE TABLE live_save (id INT PRIMARY KEY, payload BLOB) ENGINE=InnoDB');
+      engine.query("INSERT INTO live_save VALUES (1, X'00ff4142')");
+      await engine.flush();
+      return true;
+    `, directory, 60_000, false);
+    const initial = await runEngine(`
+      const initial = engine.query('SELECT payload FROM live_save WHERE id = 1').rows;
+      engine.query("UPDATE live_save SET payload=X'80ff004243' WHERE id=1");
+      await engine.flush();
+      engine.query("INSERT INTO live_save VALUES (2, X'00ff')");
+      await engine.flush();
+      return initial;
+    `, directory, 60_000, false);
+    assert.deepEqual(initial, [{ payload: { $h: '00ff4142' } }]);
+    const reopened = await runEngine('return engine.query(\'SELECT id, payload FROM live_save ORDER BY id\').rows;', directory);
+    assert.deepEqual(reopened, [
+      { id: '1', payload: { $h: '80ff004243' } },
+      { id: '2', payload: { $h: '00ff' } },
+    ]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('a damaged saved datadir reports the native InnoDB startup diagnostic', { timeout: 60_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'mariadb-startup-diagnostic-'));
+  try {
+    await runEngine('engine.query(\'CREATE TABLE diagnostic_fixture (id INT) ENGINE=InnoDB\'); return true;', directory);
+    const systemTablespace = await open(join(directory, 'ibdata1'), 'r+');
+    try { await systemTablespace.write(new Uint8Array(16 * 1024), 0, 16 * 1024, 0); }
+    finally { await systemTablespace.close(); }
+    await assert.rejects(runEngine('return true;', directory), error => {
+      assert.match(error.message, /lite4mariadb: l4m_open failed \(1\)/);
+      assert.match(error.message, /MariaDB startup diagnostics:[\s\S]*InnoDB:[\s\S]*Data structure corruption/);
+      return true;
+    });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('binary types omitted by the upstream serializer require explicit SQL casts', { timeout: 60_000 }, async () => {

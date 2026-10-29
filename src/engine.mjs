@@ -11,12 +11,28 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
   }
   const moduleUrl = engineModuleUrl ?? new URL('../vendor/lite4mariadb/index.mjs', import.meta.url).href;
   const { Lite4MariaDB } = await import(moduleUrl);
-  const options = { dataDir };
+  const startupDiagnostics = [];
+  let starting = true;
+  const options = { dataDir, printErr: (...args) => {
+    const message = args.map(String).join(' ');
+    if (starting) {
+      startupDiagnostics.push(message.slice(-2048));
+      while (startupDiagnostics.length > 32 || startupDiagnostics.join('\n').length > 8192) startupDiagnostics.shift();
+    }
+    console.error(...args);
+  } };
   if (wasmUrl !== undefined) {
     const resolved = new URL(wasmUrl, import.meta.url).href;
     options.locateFile = (path, prefix) => path.endsWith('.wasm') ? resolved : `${prefix}${path}`;
   }
-  const database = await Lite4MariaDB.create(options);
+  let database;
+  try { database = await Lite4MariaDB.create(options); }
+  catch (cause) {
+    if (!startupDiagnostics.length) throw cause;
+    const error = new Error(`${cause?.message || String(cause)}\nMariaDB startup diagnostics:\n${startupDiagnostics.join('\n')}`, { cause });
+    for (const key of ['code', 'sqlstate', 'errno']) if (cause?.[key] !== undefined) error[key] = cause[key];
+    throw error;
+  } finally { starting = false; }
   let closed = false;
 
   function requireOpen() {
@@ -77,7 +93,14 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
       return session;
     },
     closeSession(session) { requireOpen(); database.mod._l4m_session_close(session); },
-    async flush() { requireOpen(); await database.persist(); },
+    async flush() {
+      requireOpen();
+      // IDBFS can only copy filesystem bytes. Write dirty InnoDB pages out of
+      // its buffer pool first, while the bridge's operation queue is held.
+      // The pinned server waits until this checkpoint has completed.
+      query('SET GLOBAL innodb_log_checkpoint_now=ON');
+      await database.persist();
+    },
     async close() {
       if (closed) return;
       closed = true;

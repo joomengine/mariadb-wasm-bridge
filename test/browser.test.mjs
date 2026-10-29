@@ -101,6 +101,54 @@ for (const browserName of browsers) {
       assert.equal(text(result.reconnected.rows[0][0]), '1', 'Closing a PDO lease must roll back its uncommitted transaction');
     });
 
+    await t.test('completed saves survive hard reloads without closing the database', async () => {
+      // A reload destroys the dedicated worker. Do not disconnect or close it
+      // before navigation: clean shutdown checkpoints InnoDB and masks an
+      // incomplete live snapshot that Save may otherwise report as durable.
+      for (let site = 0; site < 2; site++) {
+        const persistent = { ...options, persistence: { key: `hard-reload-${randomUUID()}` } };
+        const id = site + 7;
+        try {
+          await page.evaluate(async ({ options, id }) => {
+            const api = window.bridgeTest;
+            await api.open(options);
+            await api.query('CREATE TABLE saved (id INT PRIMARY KEY, payload BLOB) ENGINE=InnoDB');
+            await api.query(`INSERT INTO saved VALUES (${id}, X'00ff4142')`);
+            await api.db.flush();
+          }, { options: persistent, id });
+
+          await page.reload();
+          const firstSaved = await page.evaluate(async options => {
+            const api = window.bridgeTest;
+            await api.open(options);
+            const saved = await api.query('SELECT id, payload FROM saved');
+            await api.query("UPDATE saved SET payload = X'ff0080'");
+            await api.db.flush();
+            await api.query("UPDATE saved SET payload = X'ff0000428000'");
+            await api.db.flush();
+            return saved;
+          }, persistent);
+          assert.equal(firstSaved.rows.length, 1);
+          assert.equal(text(firstSaved.rows[0][0]), String(id), 'Independent site keys retain their own records');
+          assert.deepEqual([...Buffer.from(firstSaved.rows[0][1], 'base64')], [0, 255, 65, 66]);
+
+          await page.reload();
+          const updated = await page.evaluate(async options => {
+            const api = window.bridgeTest;
+            await api.open(options);
+            return api.query('SELECT id, payload FROM saved');
+          }, persistent);
+          assert.equal(updated.rows.length, 1);
+          assert.equal(text(updated.rows[0][0]), String(id));
+          assert.deepEqual([...Buffer.from(updated.rows[0][1], 'base64')], [255, 0, 0, 66, 128, 0],
+            'The last completed save survives worker termination with exact binary bytes');
+        } finally {
+          // Cleanup happens only after both ungraceful reloads have been checked.
+          await page.evaluate(() => window.bridgeTest.close());
+        }
+      }
+    });
+
     await t.test('IndexedDB restores committed data after close and a page reload', async () => {
       const persistent = { ...options, persistence: { key: `reload-${randomUUID()}` } };
       await page.evaluate(async options => {
