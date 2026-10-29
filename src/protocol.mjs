@@ -56,9 +56,7 @@ export class MariaDBProtocol {
     try {
       await this.engine.query(`SET NAMES ${charset}`, undefined, session);
       await this.engine.query(`USE ${this.quotedDatabase}`, undefined, session);
-      const owned = { session, charset, valid: false };
-      await this.readState(owned);
-      this.connections.set(connection, owned);
+      this.connections.set(connection, { session, charset });
       return { connection, serverVersion: this.serverVersion };
     } catch (error) { this.engine.closeSession(session); throw error; }
   }
@@ -75,53 +73,36 @@ export class MariaDBProtocol {
     this.connections.delete(connection);
   }
 
-  async readState(owned) {
-    owned.valid = false;
-    const status = await this.engine.query('SELECT CAST(LAST_INSERT_ID() AS CHAR) AS insert_id, @@in_transaction AS active_transaction, @@SESSION.sql_mode AS sql_mode, @@character_set_client AS client_charset, @@character_set_connection AS connection_charset, @@character_set_results AS results_charset', undefined, owned.session);
-    const metadata = status.rows?.[0];
-    if (!metadata || !/^\d+$/.test(metadata.insert_id) || !['0', '1'].includes(metadata.active_transaction)
-      || typeof metadata.sql_mode !== 'string' || !/^[A-Z0-9_,]*$/.test(metadata.sql_mode)
-      || !['client_charset', 'connection_charset', 'results_charset'].every(key => metadata[key] === null || typeof metadata[key] === 'string')) {
-      fail('INVALID_ENGINE_RESULT', 'MariaDB returned invalid connection metadata');
-    }
-    owned.metadata = metadata;
-    owned.valid = true;
-    return metadata;
-  }
-
   async query(payload) {
-    const owned = this.requireConnection(payload.connection);
-    const { session, charset } = owned;
+    const { session, charset } = this.requireConnection(payload.connection);
     const query = (sql, mode) => this.engine.query(sql, mode, session);
     if (typeof payload.sql !== 'string' || !payload.sql.trim()) fail('INVALID_QUERY', 'SQL must be a non-empty string', '42000');
-    if (!owned.valid) await this.readState(owned);
-    const settings = owned.metadata;
-    // Preserve the PDO charset and quoting contract, restoring only settings
-    // the application changed. The post-query metadata reads actual server state.
-    if (['client_charset', 'connection_charset', 'results_charset'].some(key => settings[key] !== charset)) {
-      await query(`SET NAMES ${charset}`);
-    }
-    const modes = settings.sql_mode.split(',').filter(Boolean);
+    // Both supported connection charsets cross the engine ABI as valid UTF-8.
+    // Preserve the negotiated charset after application SQL changes it.
+    await query(`SET NAMES ${charset}`);
+    // Joomla's MySQL query builder strips the outer quotes from PDO::quote().
+    // Its driver therefore needs conventional MySQL backslash escaping, whose
+    // meaning must not change when application SQL enables NO_BACKSLASH_ESCAPES.
+    const modeResult = await query('SELECT @@SESSION.sql_mode AS sql_mode');
+    const modeString = modeResult.rows?.[0]?.sql_mode;
+    if (typeof modeString !== 'string' || !/^[A-Z0-9_,]*$/.test(modeString)) fail('INVALID_ENGINE_RESULT', 'MariaDB returned invalid SQL modes');
+    const modes = modeString.split(',').filter(Boolean);
     if (modes.includes('NO_BACKSLASH_ESCAPES')) {
       const retained = modes.filter(mode => mode !== 'NO_BACKSLASH_ESCAPES').join(',');
       await query(`SET SESSION sql_mode = '${retained}'`);
     }
-    let raw;
-    try {
-      raw = await query(payload.sql, { backslashEscapes: true, ansiQuotes: modes.includes('ANSI_QUOTES') });
-    } catch (error) {
-      // A failed SET can have changed an earlier variable in the same statement.
-      // Refresh its state while preserving the original application SQL error.
-      try { await this.readState(owned); } catch { owned.valid = false; }
-      throw error;
-    }
+    const raw = await query(payload.sql, { backslashEscapes: true, ansiQuotes: modes.includes('ANSI_QUOTES') });
     if (raw.affected !== undefined && (!Number.isSafeInteger(raw.affected) || raw.affected < 0)) fail('INVALID_ENGINE_RESULT', 'MariaDB returned an affected-row count outside the supported integer range', '22003');
     const columns = (raw.fields ?? []).map((name, index) => {
       const [type, charset, flags] = raw.types[index];
       return { name, table: '', type, charset, flags };
     });
     const rows = (raw.rowValues ?? []).map(row => row.map(encodeCell));
-    const metadata = await this.readState(owned);
+    const status = await query('SELECT CAST(LAST_INSERT_ID() AS CHAR) AS insert_id, @@in_transaction AS active_transaction');
+    const metadata = status.rows[0];
+    if (!metadata || !/^\d+$/.test(metadata.insert_id) || !['0', '1'].includes(metadata.active_transaction)) {
+      fail('INVALID_ENGINE_RESULT', 'MariaDB returned invalid connection metadata');
+    }
     return {
       columns,
       rows,
