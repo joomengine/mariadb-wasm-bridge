@@ -69,6 +69,9 @@ export async function createEngine({ dataDir = 'memory://', engineModuleUrl, was
     query,
     openSession() {
       requireOpen();
+      if (['_l4m_session_open', '_l4m_session_query', '_l4m_session_close'].some(name => typeof database.mod[name] !== 'function')) {
+        throw engineError('The MariaDB assets do not provide independent sessions; reload the matching bridge and engine release', 'HYC00', 0, 'ENGINE_ABI_MISMATCH');
+      }
       const session = database.mod._l4m_session_open();
       if (!Number.isInteger(session) || session < 1) throw engineError('Cannot open another MariaDB session (maximum 32)', '08004', 1040, 'CONNECTION_LIMIT');
       return session;

@@ -1,5 +1,17 @@
+diff --git a/mysys/get_password.c b/mysys/get_password.c
+index bf4749121115c4ad2ef584c7d2b203c3f1cee454..37d0d80d601516088dca66085e3052eb9fbf3d82 100644
+--- a/mysys/get_password.c
++++ b/mysys/get_password.c
+@@ -19,6 +19,7 @@
+ ** This is an own file to avoid conflicts with curses
+ */
+ #include <my_global.h>
++#include <ctype.h>
+ #include <my_sys.h>
+ #include "mysql.h"
+ #include <m_string.h>
 diff --git a/wasm/CMakeLists.txt b/wasm/CMakeLists.txt
-index a8dc86d7..06db777f 100644
+index a8dc86d7f90747f124716cd50550db962b546cc1..06db777f4b857c59b485cd38b25633fd44fce455 100644
 --- a/wasm/CMakeLists.txt
 +++ b/wasm/CMakeLists.txt
 @@ -54,7 +54,7 @@ SET_TARGET_PROPERTIES(lite4mariadb PROPERTIES
@@ -21,7 +33,7 @@ index a8dc86d7..06db777f 100644
    "SHELL:-s INVOKE_RUN=0"
    "SHELL:-s EXIT_RUNTIME=0"
 diff --git a/wasm/lite4mariadb.c b/wasm/lite4mariadb.c
-index 89e90822..d9e89127 100644
+index 89e9082295e5a28320585c95034d22427947fa87..d9e89127bfdce4a4b7110733b02979968467b28d 100644
 --- a/wasm/lite4mariadb.c
 +++ b/wasm/lite4mariadb.c
 @@ -17,6 +17,8 @@

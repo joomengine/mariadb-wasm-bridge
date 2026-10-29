@@ -32,7 +32,7 @@ if (!alreadyApplied) {
   run('git', ['-C', source, 'apply', '--check', patch]);
   run('git', ['-C', source, 'apply', patch]);
 }
-assert.equal(run('git', ['-C', source, 'diff', '--', 'wasm/lite4mariadb.c', 'wasm/CMakeLists.txt'], { stdio: 'pipe' }), (await readFile(patch, 'utf8')).trim(), 'Source modifications differ from the reviewed patch');
+assert.equal(run('git', ['-C', source, 'diff', '--full-index', '--', 'wasm/lite4mariadb.c', 'wasm/CMakeLists.txt', 'mysys/get_password.c'], { stdio: 'pipe' }), (await readFile(patch, 'utf8')).trim(), 'Source modifications differ from the reviewed patch');
 run('bash', ['wasm/build.sh'], { cwd: source, env: {
   ...process.env, JOBS: process.env.JOBS ?? '4',
   NATIVE_BUILD: path.join(buildRoot, 'native'), WASM_BUILD: path.join(buildRoot, 'wasm'),

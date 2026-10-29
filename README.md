@@ -180,7 +180,9 @@ PHP's separate memory budget also apply.
 
 The engine uses 16 preloaded pthread workers and returns `EAGAIN` on exhaustion.
 Browser logical CPU scheduling remains capped at four to reserve capacity for
-background services. Build provenance records the upstream source, patch hash,
+background services. Row and metadata lock waits default to five seconds so a
+second synchronous session reports a normal SQL timeout before the bridge
+operation deadline. Build provenance records the upstream source, patch hash,
 compiler identity and both generated asset hashes. `npm run prepare:engine`
 verifies that record before staging, and release archives include the patch,
 reproduction script and GPL notices. See [patches/NOTICE](patches/NOTICE).
