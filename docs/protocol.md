@@ -11,7 +11,7 @@ Every request includes `version: 1` and `op`. Responses are one of:
 ```
 
 ```json
-{"version":1,"ok":false,"error":{"code":"INVALID_CONNECTION","sqlstate":"08003","errno":0,"message":"The MariaDB connection lease is invalid or closed"}}
+{"version":1,"ok":false,"error":{"code":"INVALID_CONNECTION","sqlstate":"08003","errno":0,"message":"The MariaDB connection is invalid or closed"}}
 ```
 
 Host-handler transport/timeout failures also return the error envelope. Direct
@@ -21,9 +21,9 @@ JavaScript lifecycle calls (`flush`, `reset`, `close`) reject on failure.
 | --- | --- | --- |
 | `connect` | `database` (defaults to configured database), `user` (root/empty), `password` (empty), `charset` (`utf8mb4` default; `utf8mb3` or `utf8` also accepted) | `connection` opaque string; `serverVersion` string |
 | `query` | `connection`, `sql` (one statement) | Columns, positional rows, affected rows, insert ID and transaction state |
-| `close` | `connection` | Empty object, after rollback and lease release |
+| `close` | `connection` | Empty object, after closing that server session |
 
-One engine has one active lease. The token prevents accidental mixing of handles;
+One engine supports up to 32 independent server sessions. The token prevents accidental mixing of handles;
 it is not authentication between scripts sharing the same application instance.
 The bridge creates the configured database on startup. Connection requests may
 only select that database, but SQL has the privileges of the embedded engine.
@@ -58,8 +58,8 @@ or timeout may occur after execution. Do not automatically replay writes.
 ## Lifetime
 
 Close PDO handles before flushing the bridge. `reset()` drains accepted work,
-rolls back and releases an abandoned lease, for example after terminating PHP.
-It does not clear every server session variable or temporary table. If the DB
+closes every session, rolling back unfinished work and discarding temporary
+tables and session variables, for example after terminating PHP. If the DB
 worker itself times out, it is terminal and must be replaced; `close()` then
 releases resources without claiming that unflushed data was saved.
 

@@ -97,4 +97,26 @@ foreach (['utf8' => 'utf8mb3', 'utf8mb3' => 'utf8mb3', 'utf8mb4' => 'utf8mb4'] a
     same('café 中文', $db->query("SELECT 'café 中文'")->fetchColumn(), 'UTF-8 PDO round trip');
     unset($db);
 }
+// A retained, closed cursor keeps its PDO alive after the application disconnects.
+// Reconnection must not steal that connection's variables or transaction.
+$db = new PDO('mysql:dbname=joomla', 'root', '');
+$db->exec('CREATE TABLE retained_session_rows (id INT PRIMARY KEY) ENGINE=InnoDB');
+$db->exec('SET @retained_owner=41');
+$db->beginTransaction();
+$db->exec('INSERT INTO retained_session_rows VALUES (1)');
+$retained = $db->query('SELECT @retained_owner');
+same(41, $retained->fetchColumn(), 'original session variable');
+$retained->closeCursor();
+unset($db);
+$replacement = new PDO('mysql:dbname=joomla', 'root', '');
+same(null, $replacement->query('SELECT @retained_owner')->fetchColumn(), 'replacement has independent variables');
+same(0, $replacement->query('SELECT COUNT(*) FROM retained_session_rows')->fetchColumn(), 'replacement cannot see unfinished transaction');
+$replacement->exec('SET @retained_owner=42');
+$retained->execute();
+same(41, $retained->fetchColumn(), 'retained statement can execute on original session');
+unset($retained);
+same(42, $replacement->query('SELECT @retained_owner')->fetchColumn(), 'closing original does not reset replacement');
+same(0, $replacement->query('SELECT COUNT(*) FROM retained_session_rows')->fetchColumn(), 'closing original rolls back its transaction');
+$replacement->exec('DROP TABLE retained_session_rows');
+unset($replacement);
 echo json_encode(['type'=>'complete','assertions'=>$assertions],JSON_THROW_ON_ERROR),"\n";

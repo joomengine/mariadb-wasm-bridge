@@ -211,11 +211,11 @@ test('close drains accepted operations and is idempotent', timeout, async () => 
 });
 
 test('a reset failure retains its connection lease', async () => {
-  const engine = { query() { throw new Error('storage failure'); } };
+  const engine = { closeSession() { throw new Error('storage failure'); } };
   const protocol = new MariaDBProtocol(engine, 'joomla', '13.1.0');
-  protocol.connection = 'leased-connection';
+  protocol.connections.set('leased-connection', { session: 1, charset: 'utf8mb4' });
   await assert.rejects(protocol.reset(), /storage failure/);
-  assert.equal(protocol.connection, 'leased-connection');
+  assert.equal(protocol.connections.get('leased-connection').session, 1);
 });
 
 test('real sessions isolate transactions, temporary tables, variables and close ownership', timeout, async () => {
@@ -239,5 +239,59 @@ test('real sessions isolate transactions, temporary tables, variables and close 
     const reopened = await connect(database);
     assert.deepEqual((await execute(database, reopened, 'SELECT @owner')).rows[0], [null]);
     assert.deepEqual((await execute(database, reopened, 'SELECT @@max_allowed_packet, @@innodb_buffer_pool_size')).rows[0].map(decode), ['134217728', '67108864']);
+  } finally { await database.close(); }
+});
+
+test('session exhaustion is recoverable and reset closes all independent sessions', timeout, async () => {
+  const database = await createMariaDB();
+  try {
+    const sessions = [];
+    for (let index = 0; index < 32; index++) sessions.push(await connect(database));
+    const overflow = await request(database, { op: 'connect' });
+    assert.equal(overflow.error.code, 'CONNECTION_LIMIT');
+    await execute(database, sessions[0], 'CREATE TABLE reset_sessions (id INT PRIMARY KEY) ENGINE=InnoDB');
+    await execute(database, sessions[0], 'INSERT INTO reset_sessions VALUES (0)');
+    for (let index = 0; index < 2; index++) {
+      await execute(database, sessions[index], 'SET @private=1');
+      await execute(database, sessions[index], 'START TRANSACTION');
+      await execute(database, sessions[index], `INSERT INTO reset_sessions VALUES (${index + 1})`);
+    }
+    await database.reset();
+    for (const connection of sessions) assert.equal((await request(database, { op: 'query', connection, sql: 'SELECT 1' })).error.sqlstate, '08003');
+    const reopened = await connect(database);
+    assert.deepEqual((await execute(database, reopened, 'SELECT id FROM reset_sessions')).rows.map(row => decode(row[0])), ['0']);
+    assert.deepEqual((await execute(database, reopened, 'SELECT @private')).rows[0], [null]);
+  } finally { await database.close(); }
+});
+
+test('lock waits return a SQL error before the bridge deadline and preserve sessions', timeout, async () => {
+  const database = await createMariaDB();
+  try {
+    const first = await connect(database), second = await connect(database);
+    await execute(database, first, 'CREATE TABLE locked_rows (id INT PRIMARY KEY, value INT) ENGINE=InnoDB');
+    await execute(database, first, 'INSERT INTO locked_rows VALUES (1, 1)');
+    await execute(database, first, 'START TRANSACTION');
+    await execute(database, first, 'UPDATE locked_rows SET value=2 WHERE id=1');
+    const result = await request(database, { op: 'query', connection: second, sql: 'UPDATE locked_rows SET value=3 WHERE id=1' });
+    assert.equal(result.error.errno, 1205);
+    assert.equal(database.state, 'ready');
+    await execute(database, first, 'ROLLBACK');
+    await execute(database, second, 'UPDATE locked_rows SET value=3 WHERE id=1');
+    assert.deepEqual((await execute(database, first, 'SELECT value FROM locked_rows')).rows[0].map(decode), ['3']);
+  } finally { await database.close(); }
+});
+
+test('large values exceed the former packet and response limits without truncation', timeout, async () => {
+  const database = await createMariaDB();
+  try {
+    const connection = await connect(database);
+    await execute(database, connection, 'CREATE TABLE large_values (body LONGTEXT) ENGINE=InnoDB');
+    await execute(database, connection, "INSERT INTO large_values VALUES (REPEAT('x', 17 * 1024 * 1024))");
+    assert.deepEqual((await execute(database, connection, 'SELECT LENGTH(body) FROM large_values')).rows[0].map(decode), [String(17 * 1024 * 1024)]);
+    const value = (await execute(database, connection, 'SELECT body FROM large_values')).rows[0][0];
+    const bytes = Buffer.from(value, 'base64');
+    assert.equal(bytes.length, 17 * 1024 * 1024);
+    assert.equal(bytes.every(value => value === 120), true);
+    assert.deepEqual((await execute(database, connection, 'SELECT 42')).rows[0].map(decode), ['42']);
   } finally { await database.close(); }
 });

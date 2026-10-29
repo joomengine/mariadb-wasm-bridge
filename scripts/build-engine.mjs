@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,13 +18,20 @@ function run(command, args, options = {}) {
 }
 await mkdir(buildRoot, { recursive: true });
 if (!process.env.ENGINE_SOURCE_DIR) {
-  run('git', ['clone', '--no-checkout', 'https://github.com/shyim/lite4mariadb.git', source]);
-  run('git', ['-C', source, 'checkout', '--detach', commit]);
+  try { await access(path.join(source, '.git')); }
+  catch {
+    run('git', ['clone', '--no-checkout', 'https://github.com/shyim/lite4mariadb.git', source]);
+    run('git', ['-C', source, 'checkout', '--detach', commit]);
+  }
 }
 assert.equal(run('git', ['-C', source, 'rev-parse', 'HEAD'], { stdio: 'pipe' }), commit);
+run('git', ['-C', source, 'submodule', 'update', '--init', '--depth', '1', 'libmariadb']);
 const patch = path.join(root, 'patches/engine/independent-sessions.patch');
-run('git', ['-C', source, 'apply', '--check', patch]);
-run('git', ['-C', source, 'apply', patch]);
+const alreadyApplied = spawnSync('git', ['-C', source, 'apply', '--reverse', '--check', patch], { stdio: 'ignore' }).status === 0;
+if (!alreadyApplied) {
+  run('git', ['-C', source, 'apply', '--check', patch]);
+  run('git', ['-C', source, 'apply', patch]);
+}
 run('bash', ['wasm/build.sh'], { cwd: source, env: {
   ...process.env, JOBS: process.env.JOBS ?? '4',
   NATIVE_BUILD: path.join(buildRoot, 'native'), WASM_BUILD: path.join(buildRoot, 'wasm'),

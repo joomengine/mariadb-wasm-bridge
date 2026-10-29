@@ -28,6 +28,8 @@ try {
       filter: source => !/(?:^|\/)(?:\.build|\.libs|\.native-build|autom4te\.cache)(?:\/|$)|\.(?:so|o|lo|la)$/.test(source),
     });
   }
+  await mkdir(path.join(bundle, 'scripts'));
+  await cp(path.join(root, 'scripts/build-engine.mjs'), path.join(bundle, 'scripts/build-engine.mjs'));
   const vendor = path.join(bundle, 'vendor/lite4mariadb');
   await cp(vendorDirectory, vendor, { recursive: true });
   const manifest = {

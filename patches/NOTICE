@@ -1,41 +1,27 @@
-JoomEngine modification to lite4mariadb 0.1.2 generated JavaScript
+JoomEngine modifications to lite4mariadb 0.1.2
 Copyright 2026 JoomEngine contributors
 
 Upstream source: https://github.com/shyim/lite4mariadb/tree/24be9371a2f6c71250a2356631ad6feab2280b02
-License: the redistributed upstream engine and this generated JavaScript
-modification retain GPL-2.0-only; see vendor/lite4mariadb/COPYING.
+Source archive: https://github.com/shyim/lite4mariadb/archive/24be9371a2f6c71250a2356631ad6feab2280b02.tar.gz
+License: GPL-2.0-only; see vendor/lite4mariadb/COPYING. The engine patch and
+modified generated glue retain that license. Original notices remain applicable.
 
-patches/browser-pthread-pool.mjs applies exact, SHA-256-guarded changes to
-PThread.getNewWorker in lite4mariadb.js. In browsers an exhausted pool returns
-undefined instead of allocating an unloaded Worker. The caller already maps
-that result to pthread_create EAGAIN. This matches Emscripten's supported
-PTHREAD_POOL_SIZE_STRICT=2 behavior, retaining dynamic worker creation in Node.
+patches/engine/independent-sessions.patch adds independent embedded MYSQL handles,
+including open/query/close ABI entry points. It raises the InnoDB buffer pool to
+64 MiB (maximum resize 256 MiB), the packet limit to 128 MiB, and reserves up to
+32 application sessions plus the internal management connection. Closing each
+connection lets MariaDB perform its normal rollback and session cleanup.
 
-The upstream build uses PTHREAD_POOL_SIZE=16 and PTHREAD_POOL_SIZE_STRICT=0.
-MariaDB's internal task pool can request additional workers while synchronous
-native shutdown waits for tasks to finish. Browser workers created at that point
-cannot initialize until the blocked creator returns to its event loop, causing
-a shutdown deadlock. Returning EAGAIN lets MariaDB's task pool undo the failed
-worker allocation and continue using its initialized workers.
+The patch compiles with PTHREAD_POOL_SIZE=16 and PTHREAD_POOL_SIZE_STRICT=2.
+An exhausted worker pool returns EAGAIN instead of creating a worker that cannot
+initialize while synchronous native code blocks its creator. Generated browser
+logical CPU scheduling is capped at four so InnoDB leaves capacity for background
+services. The PHP runtime and native PDO source are unchanged.
 
-Reference: Emscripten src/lib/libpthread.js, PThread.getNewWorker
-https://github.com/emscripten-core/emscripten/blob/6.0.6/src/lib/libpthread.js
+Reproduce from the pinned source and Emscripten 6.0.6:
+node scripts/build-engine.mjs
 
-The WebAssembly binary, SQL engine, native PDO source, upstream npm package,
-and lockfile package-integrity hash are not modified. joomengine-patches.json
-and the release manifest record the original and transformed glue SHA-256
-values and the unchanged WASM SHA-256. Ship this notice with the engine.
-
-Reproduce the transformation from the original upstream npm package without
-installing any dependencies:
-node patches/browser-pthread-pool.mjs upstream/lite4mariadb.js prepared/lite4mariadb.js
-
-This self-contained transformation source ships in both release archives.
-
-The browser-only logical CPU scheduling budget is capped at four. InnoDB's
-native generic pool targets twice the reported concurrency; the fixed 16-worker
-browser budget must also serve its background services. The Node core count is
-unchanged. This scheduling cap avoids asking the strict browser pool to create
-workers beyond its capacity and does not change the upstream WASM binary.
-Reference: tpool/tpool_generic.cc, thread_pool_generic::set_concurrency at
-https://github.com/shyim/lite4mariadb/blob/24be9371a2f6c71250a2356631ad6feab2280b02/tpool/tpool_generic.cc
+The build script, complete patch, source URL, compiler identity and output hashes
+are included with the engine. joomengine-patches.json and the release manifest
+record the patch, generated glue and rebuilt WASM SHA-256 values. Ship this notice
+with the redistributed engine.

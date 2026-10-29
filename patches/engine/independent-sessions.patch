@@ -21,7 +21,7 @@ index a8dc86d7..06db777f 100644
    "SHELL:-s INVOKE_RUN=0"
    "SHELL:-s EXIT_RUNTIME=0"
 diff --git a/wasm/lite4mariadb.c b/wasm/lite4mariadb.c
-index 89e90822..5bb9186d 100644
+index 89e90822..d9e89127 100644
 --- a/wasm/lite4mariadb.c
 +++ b/wasm/lite4mariadb.c
 @@ -17,6 +17,8 @@
@@ -33,7 +33,7 @@ index 89e90822..5bb9186d 100644
  static int g_open;
  
  static void ensure_dir(const char *path)
-@@ -332,10 +334,11 @@ int l4m_open(void)
+@@ -332,10 +334,13 @@ int l4m_open(void)
      (char *)"--skip-networking",
      (char *)"--skip-log-bin",
      (char *)"--innodb-use-native-aio=0",
@@ -45,10 +45,12 @@ index 89e90822..5bb9186d 100644
 -    (char *)"--max-connections=10",
 +    (char *)"--max-connections=33",
 +    (char *)"--max-allowed-packet=128M",
++    (char *)"--innodb-lock-wait-timeout=5",
++    (char *)"--lock-wait-timeout=5",
      (char *)"--default-storage-engine=InnoDB",
      (char *)"--loose-innodb-read-io-threads=1",
      (char *)"--loose-innodb-write-io-threads=1",
-@@ -377,6 +380,11 @@ int l4m_open(void)
+@@ -377,6 +382,11 @@ int l4m_open(void)
  EMSCRIPTEN_KEEPALIVE
  void l4m_close(void)
  {
@@ -60,7 +62,7 @@ index 89e90822..5bb9186d 100644
    if (g_mysql)
    {
      mysql_close(g_mysql);
-@@ -449,6 +457,48 @@ char *l4m_query(const char *sql)
+@@ -449,6 +459,48 @@ char *l4m_query(const char *sql)
    return dup_str("{\"ok\":false,\"error\":\"oom\"}");
  }
  

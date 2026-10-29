@@ -11,8 +11,9 @@ License: GPL-2.0-only (see the dependency's COPYING file).
 Original copyright and license notices remain applicable to MariaDB,
 lite4mariadb and their bundled dependencies. Apache-2.0 does not replace them.
 
-The adapter uses lite4mariadb's raw l4m_query ABI to retain exact result values;
-it does not modify the redistributed upstream engine binary.
+The adapter retains exact result values through lite4mariadb's raw query ABI.
+The engine is rebuilt with a reviewed patch adding independent server sessions
+and larger bounded capacity defaults. The PHP runtime and PDO ABI are unchanged.
 The lockfile records the exact package integrity. Releases include the original
 upstream package metadata, license, and source provenance information.
 
@@ -22,7 +23,6 @@ Source: https://github.com/shyim/lite4mariadb/tree/24be9371a2f6c71250a2356631ad6
 Source archive: https://github.com/shyim/lite4mariadb/archive/24be9371a2f6c71250a2356631ad6feab2280b02.tar.gz
 Upstream build instructions are under wasm/ in that source tree.
 
-The redistributed generated JavaScript includes JoomEngine’s reviewed browser
-pthread-pool exhaustion guard, equivalent to PTHREAD_POOL_SIZE_STRICT=2.
-The upstream WASM binary is unchanged. See patches/NOTICE and the bundled
+The rebuilt engine uses PTHREAD_POOL_SIZE_STRICT=2 and a bounded browser CPU
+budget. See patches/NOTICE and the bundled
 joomengine-patches.json for modification details, licenses, and exact hashes.

@@ -119,7 +119,6 @@ export class MariaDBProtocol {
 }
 
 const encoder = new TextEncoder();
-const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function encodeCell(value) {
   if (value === null) return null;
@@ -132,14 +131,11 @@ function encodeCell(value) {
   } else {
     fail('INVALID_ENGINE_RESULT', 'MariaDB returned a cell outside the raw wire format');
   }
-  let encoded = '';
-  for (let index = 0; index < bytes.length; index += 3) {
-    const first = bytes[index];
-    const second = bytes[index + 1] ?? 0;
-    const third = bytes[index + 2] ?? 0;
-    encoded += alphabet[first >> 2] + alphabet[((first & 3) << 4) | (second >> 4)]
-      + (index + 1 < bytes.length ? alphabet[((second & 15) << 2) | (third >> 6)] : '=')
-      + (index + 2 < bytes.length ? alphabet[third & 63] : '=');
+  if (typeof bytes.toBase64 === 'function') return bytes.toBase64();
+  // Encode divisible-by-three chunks without building one JS string per byte.
+  const parts = [];
+  for (let index = 0; index < bytes.length; index += 24576) {
+    parts.push(btoa(String.fromCharCode(...bytes.subarray(index, index + 24576))));
   }
-  return encoded;
+  return parts.join('');
 }
